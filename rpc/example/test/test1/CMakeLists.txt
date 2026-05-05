@@ -17,3 +17,11 @@ set_target_properties(test1_slow_rpc_server PROPERTIES RUNTIME_OUTPUT_DIRECTORY 
 add_executable(test1_timeout_test_client timeout_test_client.cc)
 target_link_libraries(test1_timeout_test_client PRIVATE lcz_rpc)
 set_target_properties(test1_timeout_test_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+add_executable(circuit_breaker_test_server circuit_breaker_test_server.cc)
+target_link_libraries(circuit_breaker_test_server PRIVATE lcz_rpc)
+set_target_properties(circuit_breaker_test_server PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+add_executable(circuit_breaker_test_client circuit_breaker_test_client.cc)
+target_link_libraries(circuit_breaker_test_client PRIVATE lcz_rpc)
+set_target_properties(circuit_breaker_test_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)

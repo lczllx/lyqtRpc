@@ -131,11 +131,12 @@ make -j
 
 **仓库根目录演示脚本（需已编译出 `rpc/build/bin`）**
 
-- `demo.sh {etcd|offline|timeout|topic|all}`：一键演示 4 个场景
+- `demo.sh {etcd|offline|timeout|topic|circuit|all}`：一键演示 5 个场景
   - `etcd`    — registry 重启，etcd 数据不丢，服务可继续发现
   - `offline` — provider 挂掉，registry 15s 自动剔除
   - `timeout` — 慢 provider 超时控制
   - `topic`   — 发布订阅 5 种转发策略
+  - `circuit` — 熔断器：连续失败触发熔断 → 冷却后 HALF_OPEN 探测 → 恢复
 - `demo_discovery.sh`：注册发现（test4 registry / provider / consumer）
 - `demo_benchmark.sh`：JSON / Protobuf 压测入口
 
@@ -227,6 +228,9 @@ JSON（jsoncpp）好调试。Protobuf 走 `REQ_RPC_PROTO` 等，包一大和 JSO
 **注册存储后端**  
 通过 `LCZ_ETCD` 环境变量切换。未设置时走内存存储（MemoryRegistryStore），适合单机/测试；设置为 etcd 地址后走 EtcdRegistryStore，注册信息持久化到 etcd，registry 重启不丢数据。
 
+**熔断器**  
+三态状态机（CLOSED → OPEN → HALF_OPEN → CLOSED），method×host 粒度，支持环境变量配置阈值（`LCZ_CB_FAILURE_THRESHOLD`、`LCZ_CB_OPEN_DURATION`、`LCZ_CB_HALF_OPEN_MAX`）。存储后端同样走 `LCZ_ETCD` 切换（MemoryCircuitStore / EtcdCircuitStore）。调用方在 `RpcCaller` 层自动检查熔断状态，拒绝请求直接返回 false 不等待网络超时。provider 下线时通过 `delClient()` 回调同步清理连接池和熔断器状态。
+
 **日志系统**  
 自研异步日志模块：双缓冲 + AsyncLooper 后台线程，支持 DEBUG/INFO/WARN/ERROR/FATAL 五级，输出 `[时间][线程][日志器][文件:行号][级别] 消息`。落地方式可选控制台/文件/滚动文件。
 
@@ -247,7 +251,10 @@ JSON（jsoncpp）好调试。Protobuf 走 `REQ_RPC_PROTO` 等，包一大和 JSO
 `runAfter` 挂定时器，响应先到就取消。超时先到就丢后面的包，同一个 `rid` 不会又超时又当成功。
 
 **实例掉线**  
-Registry 定时扫过期实例并通知。Consumer 收到就清连接池，少往已经下线的节点打。
+Registry 定时扫过期实例并通知。Consumer 收到就清连接池并同步清理熔断器状态，少往已经下线的节点打。
+
+**熔断隔离**  
+每个 provider 的每个方法独立一个 `NodeBreaker` 状态机。连续失败达到阈值自动熔断（OPEN），后续请求直接拒绝不消耗网络资源。冷却期结束后放行一个 HALF_OPEN 探测请求，成功则恢复（CLOSED），失败则继续熔断。状态通过 `ICircuitStateStore` 接口持久化，支持内存和 etcd 两种后端。
 
 ---
 
@@ -258,7 +265,7 @@ RPC/
 ├── README.md
 ├── Dockerfile
 ├── docker-compose.yml     # etcd + registry + provider 编排
-├── demo.sh                # 功能演示（etcd/offline/timeout/topic）
+├── demo.sh                # 功能演示（etcd/offline/timeout/topic/circuit）
 ├── demo_discovery.sh      # 服务发现演示
 ├── demo_benchmark.sh      # 压测演示
 ├── .github/workflows/     # CI / Release
@@ -267,10 +274,12 @@ RPC/
 └── rpc/
     ├── muduo/             # Git 子模块（chenshuo/muduo）
     ├── src/
-    │   ├── client/
+    │   ├── client/             # caller.hpp, circuit_breaker.hpp/cpp, node_breaker.hpp/cpp
     │   ├── server/
     │   │   ├── etcd_registry_store.cpp/.hpp
-    │   │   └── memory_registry_store.cpp/.hpp
+    │   │   ├── memory_registry_store.cpp/.hpp
+    │   │   ├── etcd_circuit_store.cpp/.hpp
+    │   │   └── memory_circuit_store.cpp/.hpp
     │   └── general/
     │       └── log_system/  # 异步日志模块
     ├── proto/
@@ -289,5 +298,6 @@ RPC/
 - [x] 单测与回归（GitHub Actions 运行 `lcz_rpc_unit_tests`）
 - [x] 部署入门：Dockerfile + CI 校验 `docker build`
 - [x] etcd 注册存储：EtcdRegistryStore + MemoryRegistryStore，环境变量切换
-- [ ] 熔断、限流、重试
+- [x] 熔断：三态状态机，method×host 粒度，支持内存/etcd 持久化，环境变量可配
+- [ ] 限流、重试
 - [ ] 监控：QPS、延迟分位、错误码

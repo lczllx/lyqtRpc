@@ -2,11 +2,15 @@
 #include <iostream>
 #include "requestor.hpp"
 #include "caller.hpp"
+#include "circuit_breaker.hpp"
 #include "rpc_registry.hpp"
 #include "rpc_topic.hpp"
 #include <string>
+#include <cstdlib>
 #include "../general/publicconfig.hpp"
 #include "../general/log_system/lcz_log.h"
+#include "../server/memory_circuit_store.hpp"
+#include "../server/etcd_circuit_store.hpp"
 
 namespace lcz_rpc
 {
@@ -191,8 +195,9 @@ namespace lcz_rpc
             // enablediscover 是否开启服务发现
             RpcClient(bool enablediscover, const std::string &ip, int port)
                 : _enablediscover(enablediscover),
+                  _breaker(makeBreaker()),
                   _requestor(std::make_shared<Requestor>()),
-                  _caller(std::make_shared<RpcCaller>(_requestor)),
+                  _caller(std::make_shared<RpcCaller>(_requestor, _breaker)),
                   _dispacher(std::make_shared<Dispacher>()),
                   _loadbalance_strategy(LoadBalanceStrategy::ROUND_ROBIN)
             {
@@ -266,11 +271,35 @@ namespace lcz_rpc
             }
 
         private:
-            // 收到下线通知时从连接池移除该 host
+            // 根据环境变量 LCZ_ETCD 创建熔断器存储后端
+            static CircuitBreaker::ptr makeBreaker()
+            {
+                CircuitConfig cfg;
+                const char *env;
+                if ((env = std::getenv("LCZ_CB_FAILURE_THRESHOLD"))) cfg.failure_threshold = std::atoi(env);
+                if ((env = std::getenv("LCZ_CB_OPEN_DURATION")))    cfg.open_duration_sec = std::atoi(env);
+                if ((env = std::getenv("LCZ_CB_HALF_OPEN_MAX")))    cfg.half_open_max_req = std::atoi(env);
+
+                const char *etcd_url = std::getenv("LCZ_ETCD");
+                if (etcd_url && etcd_url[0] != '\0')
+                {
+                    LCZ_INFO("[RpcClient] 使用 Etcd 存储断路器状态，etcd=%s", etcd_url);
+                    return std::make_shared<CircuitBreaker>(
+                        cfg,
+                        std::make_shared<lcz_rpc::server::EtcdCircuitStore>(etcd_url));
+                }
+                LCZ_INFO("[RpcClient] 使用内存存储断路器状态");
+                return std::make_shared<CircuitBreaker>(
+                    cfg,
+                    std::make_shared<lcz_rpc::server::MemoryCircuitStore>());
+            }
+
+            // 收到下线通知时从连接池移除该 host 并清理对应熔断器
             void delClient(const HostInfo &host)
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 _rpc_clients.erase(host);
+                _breaker->removeHost(hostKey(host));
             }
             // 创建新连接并加入连接池
             BaseClient::ptr newClient(const HostInfo &host)
@@ -348,6 +377,7 @@ namespace lcz_rpc
             std::unordered_map<HostInfo, BaseClient::ptr, HostHash> _rpc_clients; // 连接池 -长连接,收到服务下线通知后通过回调删除
             Requestor::ptr _requestor;
             ClientDiscover::ptr _discover_client; // 服务发现客户端
+            CircuitBreaker::ptr _breaker;         // 熔断器（必须在 _caller 之前声明）
             RpcCaller::ptr _caller;
             Dispacher::ptr _dispacher;
             LoadBalanceStrategy _loadbalance_strategy;//负载均衡策略

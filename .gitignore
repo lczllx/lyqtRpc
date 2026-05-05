@@ -1,7 +1,7 @@
 # 文档目录（不提交）
 rpc/docs/
 gdb_debug/
-docs
+docs/
 
 # 构建目录
 build/

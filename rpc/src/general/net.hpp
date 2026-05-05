@@ -172,8 +172,9 @@ namespace lcz_rpc
          // 将消息序列化后通过底层 TcpConnection 发送
           virtual void send(const BaseMessage::ptr &msg)override
           {
+            if (!_connection->connected()) return;
             std::string data=_protocol->serialize(msg);
-             _connection->send(data);
+            _connection->send(data);
           }
           // 关闭底层 TCP 连接
           virtual void shutdown()override
@@ -184,6 +185,11 @@ namespace lcz_rpc
           virtual bool connected()override
           {
             return _connection->connected();
+          }
+          // 检查底层连接是否仍然有效
+          virtual std::string peerAddress()const override
+          {
+            return _connection->peerAddress().toIpPort();  // muduo::InetAddress::toIpPort() → "10.0.0.1:8889"
           }
           // 获取底层连接的 EventLoop，供 Requestor 等设置超时定时器
           muduo::net::EventLoop* getLoop() const

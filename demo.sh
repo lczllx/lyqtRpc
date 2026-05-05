@@ -167,6 +167,63 @@ demo_timeout() {
     echo -e "\n${GREEN}超时控制演示完成${NC}"
 }
 
+demo_circuit() {
+    TOTAL=5
+    echo -e "${BOLD}=== 演示: 熔断器 — 故障自动隔离与恢复 ===${NC}"
+    echo "场景: server 前3次正常 → 接下来故意慢响应(触发客户端超时) → 熔断器打开拒绝请求 → 冷却后 HALF_OPEN 探测 → server 恢复正常 → 熔断器关闭"
+    echo ""
+
+    # 短周期便于演示: 5次失败触发熔断, 8s冷却期
+    export LCZ_CB_FAILURE_THRESHOLD=5
+    export LCZ_CB_OPEN_DURATION=8
+    export LCZ_CB_HALF_OPEN_MAX=1
+
+    step 1 "启动熔断器测试 server"
+    "$BIN/circuit_breaker_test_server" > "$LOG_DIR/cb_server.log" 2>&1 &
+    SRV_PID=$!
+    sleep 2
+    info "server 启动 (pid=$SRV_PID, 监听 127.0.0.1:8889)"
+    info "server 行为: 前3次正常响应, 后续5次慢响应(触发超时), 然后恢复正常"
+
+    step 2 "启动 client 循环调用 add(1,2)，1次/秒"
+    info "默认超时=5s, 熔断阈值=5, 冷却=8s"
+    timeout 90 "$BIN/circuit_breaker_test_client" > "$LOG_DIR/cb_client.log" 2>&1 &
+    CLIENT_PID=$!
+    sleep 6
+    echo -e "  ${CYAN}=== 早期输出（正常期）===${NC}"
+    grep -E "^\[" "$LOG_DIR/cb_client.log" | head -5
+
+    step 3 "等待超时累积 → 熔断器打开 → 快速拒绝"
+    info "客户端每次超时需等5s, 5次失败共约25s..."
+    sleep 30
+    echo -e "  ${CYAN}=== 中期输出（熔断期）===${NC}"
+    grep -E "^\[|CLOSED => OPEN|熔断器打开|熔断拒绝|熔断" "$LOG_DIR/cb_client.log" | tail -20
+
+    step 4 "等待冷却结束 + HALF_OPEN 探测恢复"
+    info "冷却期 = 8s, 之后 HALF_OPEN 探测..."
+    sleep 20
+    echo -e "  ${CYAN}=== 后期输出（恢复期）===${NC}"
+    grep -E "^\[|HALF_OPEN|=> CLOSED|熔断器恢复" "$LOG_DIR/cb_client.log" | tail -15
+
+    step 5 "结果验证"
+    echo -e "  ${CYAN}=== 完整日志摘要 ===${NC}"
+    grep -E "熔断|=> OPEN|=> HALF|=> CLOSED|熔断器恢复" "$LOG_DIR/cb_client.log" | head -20
+
+    if grep -q "CLOSED => OPEN\|熔断器打开" "$LOG_DIR/cb_client.log"; then
+        info "熔断器 OPEN ✓"
+    else
+        warn "未检测到熔断 OPEN"
+    fi
+    if grep -q "=> CLOSED\|熔断器恢复" "$LOG_DIR/cb_client.log"; then
+        info "熔断器恢复 CLOSED ✓"
+    else
+        warn "未检测到恢复"
+    fi
+
+    kill $SRV_PID $CLIENT_PID 2>/dev/null || true
+    echo -e "\n${GREEN}熔断器演示完成${NC}"
+}
+
 demo_topic() {
     TOTAL=4
     echo -e "${BOLD}=== 演示: Topic 发布订阅 — 多策略分发 ===${NC}"
@@ -227,20 +284,25 @@ case "${1:-}" in
     topic)
         demo_topic
         ;;
+    circuit)
+        demo_circuit
+        ;;
     all)
         demo_etcd
         demo_offline
         demo_timeout
         demo_topic
+        demo_circuit
         echo -e "\n${BOLD}${GREEN}全部演示完成。日志: $LOG_DIR/${NC}"
         ;;
     *)
-        echo "用法: ./demo.sh {etcd|offline|timeout|topic|all}"
+        echo "用法: ./demo.sh {etcd|offline|timeout|topic|circuit|all}"
         echo ""
         echo "  etcd    — 演示 registry 重启后 etcd 数据不丢，服务可继续发现"
         echo "  offline — 演示 provider 挂掉后 registry 自动检测并剔除"
         echo "  timeout — 演示慢 provider 超时控制，client 1s 超时立即返回"
         echo "  topic   — 演示发布订阅 5 种转发策略（broadcast/priority/fanout/hash/redundant）"
+        echo "  circuit — 演示熔断器：连续失败触发熔断 → 冷却后 HALF_OPEN 探测 → 恢复"
         echo "  all     — 全部跑一遍"
         echo ""
         echo "  注意: etcd 演示需要先启动 etcd 服务 (etcd --listen-client-urls=http://127.0.0.1:2379 &)"

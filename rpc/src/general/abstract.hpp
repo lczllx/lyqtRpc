@@ -66,6 +66,8 @@ namespace lcz_rpc {
         virtual void shutdown() = 0;
         // 检查连接状态
         virtual bool connected() = 0;
+        //返回对端地址
+        virtual std::string peerAddress() const = 0;
     };
 
     // 连接建立回调
