@@ -1,18 +1,26 @@
-version: "3.8"
+# =============================================================================
+# LCZ RPC — 本地开发编排
+# -----------------------------------------------------------------------------
+# 启动（无需手动初始化子模块，Dockerfile 会自动处理缺失的 muduo）：
+#   docker compose up -d
+#   docker compose logs -f          # 查看日志
+#   docker compose down -v          # 停止并清理数据卷
+# =============================================================================
 
 services:
   etcd:
-    image: bitnamilegacy/etcd:3.5
+    image: quay.io/coreos/etcd:v3.5.30
     restart: unless-stopped
     environment:
-      ALLOW_NONE_AUTHENTICATION: "yes"
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_DATA_DIR: /etcd-data
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 10s
     ports:
       - "2379:2379"
     volumes:
@@ -21,7 +29,6 @@ services:
   registry:
     build:
       context: .
-    image: lcz-rpc:local
     restart: unless-stopped
     depends_on:
       etcd:
@@ -35,11 +42,12 @@ services:
   provider:
     build:
       context: .
-    image: lcz-rpc:local
     restart: unless-stopped
     depends_on:
       - registry
     command: /opt/rpc/bin/test1_rpc_server
+    environment:
+      LCZ_ETCD: http://etcd:2379
     ports:
       - "8889:8889"
 
