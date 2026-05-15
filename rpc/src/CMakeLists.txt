@@ -5,6 +5,7 @@ find_package(CURL REQUIRED)
 add_library(lcz_registry_store STATIC
     server/memory_registry_store.cpp
     server/etcd_registry_store.cpp
+    server/etcd_leader_election.cpp
     server/memory_circuit_store.cpp
     server/etcd_circuit_store.cpp
     client/node_breaker.cpp

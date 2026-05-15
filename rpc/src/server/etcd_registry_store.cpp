@@ -145,6 +145,69 @@ namespace lcz_rpc
             return (rc == CURLE_OK) ? resp : "";
         }
 
+        // -------------------- etcd v3 lease / txn API --------------------
+        // 供 EtcdLeaderElector 进行分布式选举使用。
+        // 注意：当前 EtcdLeaderElector 拥有独立 CURL* 句柄，自行构造 JSON 调用 etcd，
+        //       并未直接调用这些方法。此处保留作为 EtcdRegistryStore 的 etcd API 完整封装。
+
+        // POST /v3/lease/grant → {"ID": "12345"} 创建一个新的租约
+        int64_t EtcdRegistryStore::http_lease_grant(int ttl_sec)
+        {
+            std::string body = R"({"TTL":)" + std::to_string(ttl_sec) + "}";
+            std::string resp = curl_post("/v3/lease/grant", body);
+            if (resp.empty()) return -1;
+            Json::Value root;
+            Json::Reader r;
+            if (!r.parse(resp, root)) return -1;
+            std::string id_str = root.get("ID", "").asString();
+            if (id_str.empty()) return -1;
+            return std::stoll(id_str); // lease ID 是 int64
+        }
+
+        // POST /v3/lease/keepalive → 续约一次，返回 {"TTL": "5"} 表示剩余 TTL
+        bool EtcdRegistryStore::http_lease_keepalive(int64_t lease_id)
+        {
+            std::string body = R"({"ID":")" + std::to_string(lease_id) + R"("})";
+            std::string resp = curl_post("/v3/lease/keepalive", body);
+            if (resp.empty()) return false;
+            Json::Value root;
+            Json::Reader r;
+            if (!r.parse(resp, root)) return false;
+            return root.get("TTL", "").asString().size() > 0; // TTL 存在 = 续约成功
+        }
+
+        // POST /v3/kv/lease/revoke → 主动撤销 lease，绑定该 lease 的所有 key 立即删除
+        bool EtcdRegistryStore::http_lease_revoke(int64_t lease_id)
+        {
+            std::string body = R"({"ID":")" + std::to_string(lease_id) + R"("})";
+            std::string resp = curl_post("/v3/kv/lease/revoke", body);
+            return !resp.empty();
+        }
+
+        // POST /v3/kv/txn → CAS 原子操作：compare version==0，成功则 put 并绑定 lease
+        // key/value 需 base64 编码（etcd REST API 要求）
+        // 返回根对象的 "succeeded" 字段
+        bool EtcdRegistryStore::http_txn_create_if_absent(const std::string &key,
+                                                           const std::string &value,
+                                                           int64_t lease_id)
+        {
+            std::string b64_key = base64_encode(key);
+            std::string b64_val = base64_encode(value);
+            std::string body =
+                R"({"compare":[{"key":")" + b64_key +
+                R"(","result":"EQUAL","target":"VERSION","version":"0"}],)"      // key 不存在
+                R"("success":[{"request_put":{"key":")" + b64_key +
+                R"(","value":")" + b64_val +
+                R"(","lease":)" + std::to_string(lease_id) + "}],"              // 创建并绑定 lease
+                R"("failure":[]})";                                                // key 已存在则不做任何操作
+            std::string resp = curl_post("/v3/kv/txn", body);
+            if (resp.empty()) return false;
+            Json::Value root;
+            Json::Reader r;
+            if (!r.parse(resp, root)) return false;
+            return root.get("succeeded", false).asBool();
+        }
+
         void EtcdRegistryStore::registerInstance(
             const BaseConnection::ptr &conn,
             const ::lcz_rpc::HostInfo &host,

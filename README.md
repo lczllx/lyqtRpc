@@ -228,6 +228,9 @@ JSON（jsoncpp）好调试。Protobuf 走 `REQ_RPC_PROTO` 等，包一大和 JSO
 **注册存储后端**  
 通过 `LCZ_ETCD` 环境变量切换。未设置时走内存存储（MemoryRegistryStore），适合单机/测试；设置为 etcd 地址后走 EtcdRegistryStore，注册信息持久化到 etcd，registry 重启不丢数据。
 
+**注册中心多实例 HA**  
+设 `LCZ_ETCD` 后启动多个 Registry 实例（同一端口，内核 `SO_REUSEPORT` 分发连接）。实例间通过 etcd lease + CAS 事务选举 leader（5s TTL，1s 续约）；仅 leader 执行过期 provider 扫描，follower 依赖客户端 10s 健康检查兜底。Leader 崩溃后 lease 5s 自动过期，follower 自动接管。
+
 **熔断器**  
 三态状态机（CLOSED → OPEN → HALF_OPEN → CLOSED），method×host 粒度，支持环境变量配置阈值（`LCZ_CB_FAILURE_THRESHOLD`、`LCZ_CB_OPEN_DURATION`、`LCZ_CB_HALF_OPEN_MAX`）。存储后端同样走 `LCZ_ETCD` 切换（MemoryCircuitStore / EtcdCircuitStore）。调用方在 `RpcCaller` 层自动检查熔断状态，拒绝请求直接返回 false 不等待网络超时。provider 下线时通过 `delClient()` 回调同步清理连接池和熔断器状态。
 
@@ -265,7 +268,7 @@ RPC/
 ├── README.md
 ├── Dockerfile
 ├── docker-compose.yml     # etcd + registry + provider 编排
-├── demo.sh                # 功能演示（etcd/offline/timeout/topic/circuit）
+├── demo.sh                # 功能演示（etcd/offline/timeout/topic/circuit/ha）
 ├── demo_discovery.sh      # 服务发现演示
 ├── demo_benchmark.sh      # 压测演示
 ├── .github/workflows/     # CI / Release
@@ -278,6 +281,9 @@ RPC/
     │   ├── server/
     │   │   ├── etcd_registry_store.cpp/.hpp
     │   │   ├── memory_registry_store.cpp/.hpp
+    │   │   ├── leader_election.hpp
+    │   │   ├── memory_leader_election.hpp
+    │   │   ├── etcd_leader_election.cpp/.hpp
     │   │   ├── etcd_circuit_store.cpp/.hpp
     │   │   └── memory_circuit_store.cpp/.hpp
     │   └── general/
@@ -299,5 +305,6 @@ RPC/
 - [x] 部署入门：Dockerfile + CI 校验 `docker build`
 - [x] etcd 注册存储：EtcdRegistryStore + MemoryRegistryStore，环境变量切换
 - [x] 熔断：三态状态机，method×host 粒度，支持内存/etcd 持久化，环境变量可配
+- [x] 注册中心多实例 HA：etcd lease + CAS 选举 leader，SO_REUSEPORT 多实例同端口部署
 - [ ] 限流、重试
 - [ ] 监控：QPS、延迟分位、错误码

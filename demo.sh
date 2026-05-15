@@ -1,6 +1,6 @@
 #!/bin/bash
 # RPC 功能演示脚本
-# 用法: ./demo.sh {etcd|offline|timeout|topic|all}
+# 用法: ./demo.sh {etcd|offline|timeout|topic|circuit|ha|all}
 
 set -e
 
@@ -269,6 +269,121 @@ demo_topic() {
     echo -e "\n${GREEN}Topic 演示完成${NC}"
 }
 
+demo_ha() {
+    TOTAL=6
+    echo -e "${BOLD}=== 演示: 注册中心多实例 HA ===${NC}"
+    echo "场景: 启动 3 个 registry 实例（同一端口 SO_REUSEPORT）→ etcd lease 选举 leader → 杀 leader → follower 自动接管"
+    echo "意义: 注册中心本身挂了不影响服务，其他实例自动接管，外部无感知"
+    echo ""
+
+    if ! pgrep -x etcd >/dev/null; then
+        warn "请先启动 etcd: etcd --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379 &"
+        return 1
+    fi
+    info "etcd 已在运行"
+    export LCZ_ETCD=http://127.0.0.1:2379
+
+    # 记录每个实例的 pid，用于精确控制
+    HA_PIDS=()
+    HA_LOGS=("$LOG_DIR/ha_node1.log" "$LOG_DIR/ha_node2.log" "$LOG_DIR/ha_node3.log")
+
+    step 1 "启动 3 个 registry 实例（同一端口 8080, kReusePort）"
+    for i in 0 1 2; do
+        "$BIN/test1_registry_server" > "${HA_LOGS[$i]}" 2>&1 &
+        HA_PIDS[$i]=$!
+        info "实例 $((i+1)) 启动 pid=${HA_PIDS[$i]} log=${HA_LOGS[$i]}"
+    done
+    info "内核 SO_REUSEPORT 自动分发新连接到 3 个实例"
+
+    step 2 "等待 etcd lease 选举完成（约 3s）"
+    sleep 3
+    echo -e "  ${CYAN}=== 选举结果 ===${NC}"
+    for log in "${HA_LOGS[@]}"; do
+        grep -E "成为 leader|退为 follower|选举已启动" "$log" | tail -5
+    done
+
+    # 找到 leader 的 pid
+    LEADER_LOG=""
+    for log in "${HA_LOGS[@]}"; do
+        if grep -q "成为 leader" "$log" 2>/dev/null; then
+            LEADER_LOG="$log"
+            break
+        fi
+    done
+
+    if [ -z "$LEADER_LOG" ]; then
+        warn "未检测到 leader！检查日志: ${HA_LOGS[*]}"
+        kill "${HA_PIDS[@]}" 2>/dev/null || true
+        return 1
+    fi
+    # 从日志提取 leader 的 instance 信息（hostname:pid）
+    LEADER_INFO=$(grep "成为 leader" "$LEADER_LOG" | tail -1)
+    info "当前 leader: $LEADER_INFO"
+
+    step 3 "启动 provider 注册服务 → 内核自动路由到其中一个实例"
+    "$BIN/test1_rpc_server" > "$LOG_DIR/ha_prov.log" 2>&1 &
+    PROV_PID=$!
+    sleep 3
+    if grep -q "注册成功" "$LOG_DIR/ha_prov.log" 2>/dev/null; then
+        info "provider 注册成功（add 方法, 127.0.0.1:8889）"
+    else
+        warn "provider 注册可能失败，检查 $LOG_DIR/ha_prov.log"
+    fi
+    # 验证 etcd 中有注册数据
+    info "etcd 中注册数据:"
+    etcdctl get --prefix /lcz-rpc/v1/providers/add/ 2>/dev/null | head -6 || true
+
+    step 4 "client 调用 add(66,33)，验证服务可发现"
+    timeout 10 "$BIN/test1_rpc_client" > "$LOG_DIR/ha_client1.log" 2>&1 || true
+    if grep -q "result:99" "$LOG_DIR/ha_client1.log" 2>/dev/null; then
+        info "调用成功: add(66,33) = 99 ✓"
+    else
+        warn "调用失败，查看 $LOG_DIR/ha_client1.log"
+    fi
+
+    step 5 "杀掉 leader 实例 → etcd lease 5s 后过期 → key 自动删除"
+    # leader 日志中"instance=hostname:PID"，提取 PID
+    LEADER_PID=$(echo "$LEADER_INFO" | grep -oP 'instance=\S+' | grep -oP '\d+$')
+    if [ -z "$LEADER_PID" ]; then
+        # fallback: 从 leader 日志文件名推断
+        for i in 0 1 2; do
+            if [ "${HA_LOGS[$i]}" = "$LEADER_LOG" ]; then
+                LEADER_PID=${HA_PIDS[$i]}
+                break
+            fi
+        done
+    fi
+    info "杀掉 leader (pid=$LEADER_PID)"
+    kill "$LEADER_PID" 2>/dev/null || true
+    sleep 1
+    info "leader 已停止，lease 将在 5s 后过期"
+
+    step 6 "等待 follower 接管（lease 过期 + CAS 重试 ≈ 6s）"
+    sleep 6
+    echo -e "  ${CYAN}=== 接管结果 ===${NC}"
+    for log in "${HA_LOGS[@]}"; do
+        grep -E "成为 leader|退为 follower" "$log" | tail -3
+    done
+
+    # 检查是否有新 leader
+    NEW_LEADER=$(grep -l "成为 leader" "${HA_LOGS[@]}" 2>/dev/null | head -1)
+    if [ -n "$NEW_LEADER" ] && [ "$NEW_LEADER" != "$LEADER_LOG" ]; then
+        info "follower 接管成功！新 leader: $(grep '成为 leader' "$NEW_LEADER" | tail -1)"
+        info "故障转移时间 ≈ $(grep -c 'tick\|续约\|竞选' "$NEW_LEADER" 2>/dev/null | head -1) 个 tick 内完成"
+    elif [ -n "$NEW_LEADER" ]; then
+        info "leader 未切换（原 leader 可能在 lease 过期前被 kill 的实例还未清理）"
+    else
+        warn "未检测到新 leader，检查剩余实例日志"
+    fi
+
+    # 清理：杀掉剩余 registry 实例和 provider
+    for pid in "${HA_PIDS[@]}"; do
+        kill "$pid" 2>/dev/null || true
+    done
+    kill $PROV_PID 2>/dev/null || true
+    echo -e "\n${GREEN}多实例 HA 演示完成${NC}"
+}
+
 mkdir -p "$LOG_DIR"
 
 case "${1:-}" in
@@ -287,25 +402,30 @@ case "${1:-}" in
     circuit)
         demo_circuit
         ;;
+    ha)
+        demo_ha
+        ;;
     all)
         demo_etcd
         demo_offline
         demo_timeout
         demo_topic
         demo_circuit
+        demo_ha
         echo -e "\n${BOLD}${GREEN}全部演示完成。日志: $LOG_DIR/${NC}"
         ;;
     *)
-        echo "用法: ./demo.sh {etcd|offline|timeout|topic|circuit|all}"
+        echo "用法: ./demo.sh {etcd|offline|timeout|topic|circuit|ha|all}"
         echo ""
         echo "  etcd    — 演示 registry 重启后 etcd 数据不丢，服务可继续发现"
         echo "  offline — 演示 provider 挂掉后 registry 自动检测并剔除"
         echo "  timeout — 演示慢 provider 超时控制，client 1s 超时立即返回"
         echo "  topic   — 演示发布订阅 5 种转发策略（broadcast/priority/fanout/hash/redundant）"
         echo "  circuit — 演示熔断器：连续失败触发熔断 → 冷却后 HALF_OPEN 探测 → 恢复"
+        echo "  ha      — 演示多实例 HA：3 个 registry 通过 etcd 选举 leader，杀 leader 后 follower 接管"
         echo "  all     — 全部跑一遍"
         echo ""
-        echo "  注意: etcd 演示需要先启动 etcd 服务 (etcd --listen-client-urls=http://127.0.0.1:2379 &)"
+        echo "  注意: etcd / ha 演示需要先启动 etcd 服务 (etcd --listen-client-urls=http://127.0.0.1:2379 &)"
         echo "  日志: $LOG_DIR/"
         ;;
 esac
