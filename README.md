@@ -12,6 +12,69 @@ GitHub：https://github.com/lczllx/RPC
 序列化：jsoncpp（JSON）/ Protobuf  
 构建：CMake  
 
+## 测试环境
+
+| 项目 | 规格 |
+|------|------|
+| 云服务器 | 4C8G 5Mbps |
+| 操作系统 | Ubuntu 22.04.5 LTS |
+| 编译器 | g++ 12.3.0 |
+| 构建工具 | CMake 3.22.1 |
+| 压测方式 | 本机回环 (localhost) |
+
+## 如何复现
+
+子模块必须先拉取：
+
+```bash
+git clone https://github.com/lczllx/RPC.git
+cd RPC
+git submodule update --init --recursive
+```
+
+一键构建：
+
+```bash
+bash autobuild/quick_build.sh
+```
+
+Docker（`docker-compose.yml` 编排 etcd + registry + provider）：
+
+```bash
+git submodule update --init --recursive
+docker-compose up -d
+```
+
+功能演示：
+
+```bash
+./demo.sh all              # 全部场景：etcd/offline/timeout/topic/circuit
+./demo_discovery.sh        # 注册发现
+./demo_benchmark.sh        # JSON/Protobuf 压测
+```
+
+## 代码统计
+
+| 项目 | 数值 |
+|------|------|
+| RPC 框架总行数 | 8,545（仅 `rpc/src/`，不含 muduo 子模块和 proto 生成代码） |
+| 自己写的行数 | 8,023（不含空行/注释） |
+| 单元测试 | 672 行，6 个测试文件（GTest） |
+| 示例代码 | 1,589 行 |
+| 源文件数 | 43（`rpc/src/` 下 .h/.hpp/.cc/.cpp） |
+| 测试覆盖范围 | LV 协议拆包/封包、消息工厂、消息校验、错误码 |
+
+## 已知缺陷
+
+- **单锁瓶颈**：`Requestor::_request_desc` 用单把 `std::mutex` 保护所有请求映射，高并发下（>5 万 QPS）锁竞争显著。
+- **etcd 写放大**：每个 provider 每 3s 对每个 method 各发一次负载上报 PUT（心跳是 10s 一次），method×host 数量一大对 etcd 压力线性增长。
+- **O(n) 心跳扫描**：`RegistryServer` 每 5s 全量扫描所有 provider，无索引优化，provider 数量上万时 CPU 可观。
+- **无重试机制**：超时直接失败，调用方需自行实现幂等重试。
+- **静态 `pri_cursor`**：`TopicManager` 的优先级轮转游标是 `static` 变量，被所有 Topic 实例共享，多 topic 场景下轮转语义错乱。
+- **Topic 无持久化**：重启丢全部订阅关系和消息。
+- **无鉴权/加密**：无 TLS、无认证、无 token 机制。
+- **单元测试覆盖不足**：仅覆盖 LV 协议和消息层，注册中心、熔断器、选举、网络层均无单测。
+
 ---
 
 这是我用 C++11 + muduo 写的一个轻量 RPC，JSON、Protobuf 都能走，带注册中心、心跳、负载均衡，调用有同步、Future、回调几种。

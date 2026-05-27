@@ -66,27 +66,27 @@ namespace lcz_rpc
             return node->allowRequest();
         }
 
-        // 调用成功——转发给对应 NodeBreaker，每次调用都持久化
+        // 调用成功——仅状态转换时持久化
         void CircuitBreaker::onSuccess(const std::string &method, const std::string &host)
         {
             auto node = getOrCreate(method, host);
             bool changed = node->onSuccess();
-            _store->save(method, host, node->status());
             if (changed)
             {
+                _store->save(method, host, node->status());
                 LCZ_INFO("[CircuitBreaker] 熔断器恢复 method=%s host=%s state=CLOSED",
                          method.c_str(), host.c_str());
             }
         }
 
-        // 调用失败——转发给对应 NodeBreaker，每次调用都持久化
+        // 调用失败——仅状态转换时持久化
         void CircuitBreaker::onFailure(const std::string &method, const std::string &host)
         {
             auto node = getOrCreate(method, host);
             bool changed = node->onFailure();
-            _store->save(method, host, node->status());
             if (changed)
             {
+                _store->save(method, host, node->status());
                 LCZ_INFO("[CircuitBreaker] 熔断器打开 method=%s host=%s state=OPEN failures=%d",
                          method.c_str(), host.c_str(), node->status().failures);
             }

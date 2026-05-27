@@ -15,6 +15,16 @@ step()  { echo -e "\n${BOLD}${CYAN}[$1/$TOTAL]${NC} ${BOLD}$2${NC}"; }
 info()  { echo -e "  ${GREEN}→${NC} $*"; }
 warn()  { echo -e "  ${RED}→${NC} $*"; }
 
+COMPOSE_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# 检查端口是否已被占用（兼容 docker compose 场景）：如已占用，返回 0，后续跳过本地启动
+port_listening() { ss -tln | grep -q ":${1} "; }
+
+# 检查 docker-compose 是否管理着指定服务且处于运行状态
+compose_running() {
+    cd "$COMPOSE_DIR" && docker-compose ps "$1" 2>/dev/null | grep -q "Up"
+}
+
 cleanup() {
     killall test1_registry_server test1_rpc_server test1_rpc_client \
             test4_registry_server test4_provider_server test4_consumer_client \
@@ -26,45 +36,79 @@ demo_etcd() {
     TOTAL=6
     echo -e "${BOLD}=== 演示: etcd 持久化 — registry 重启状态不丢 ===${NC}"
     echo "场景: provider 注册到 registry → kill registry → 重启 registry → 注册信息仍在 etcd 中"
-    echo "意义: 面试官问'注册中心挂了怎么办'，你的答案'数据在 etcd，重启即恢复'"
+    #echo "意义: 面试官问'注册中心挂了怎么办'，你的答案'数据在 etcd，重启即恢复'"
     echo ""
 
-    # 检查 etcd
-    if ! pgrep -x etcd >/dev/null; then
+    # 检查 etcd：先查宿主机进程，再查 TCP 端口（兼容 docker compose 场景）
+    if pgrep -x etcd >/dev/null 2>&1; then
+        info "etcd 进程已在宿主机运行"
+    elif curl -s http://127.0.0.1:2379/version >/dev/null 2>&1; then
+        info "etcd 端口 2379 已监听（可能是 docker 容器）"
+    else
         warn "请先启动 etcd: etcd --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379 &"
+        warn "或: docker compose up -d etcd"
         return 1
     fi
-    info "etcd 已在运行"
     export LCZ_ETCD=http://127.0.0.1:2379
 
-    # 起 registry（etcd 模式）
-    step 1 "启动 registry（etcd 后端）"
-    "$BIN/test1_registry_server" > "$LOG_DIR/etcd_reg.log" 2>&1 &
-    REG_PID=$!
-    sleep 2
-    info "registry 启动 (pid=$REG_PID, LCZ_ETCD=http://127.0.0.1:2379)"
+    # 判断 registry 是 docker 管理还是本地进程
+    local DOCKER_MODE=false
+    if compose_running registry; then
+        DOCKER_MODE=true
+    fi
+
+    if $DOCKER_MODE; then
+        step 1 "registry 由 docker-compose 管理（端口 8080）"
+        info "跳过本地启动，后续通过 docker-compose stop/start 控制"
+    else
+        step 1 "启动 registry（etcd 后端）"
+        "$BIN/test1_registry_server" > "$LOG_DIR/etcd_reg.log" 2>&1 &
+        REG_PID=$!
+        sleep 2
+        info "registry 启动 (pid=$REG_PID, LCZ_ETCD=http://127.0.0.1:2379)"
+    fi
 
     # 起 provider，注册 add 服务
-    step 2 "启动 provider 并注册到 registry"
-    "$BIN/test1_rpc_server" > "$LOG_DIR/etcd_prov.log" 2>&1 &
-    PROV_PID=$!
-    sleep 3
-    info "provider 已注册 add 方法到 etcd"
+    if compose_running provider || port_listening 8889; then
+        step 2 "复用已有 provider（端口 8889 已监听，跳过本地启动）"
+        PROV_PID="SKIPPED"
+        info "provider 来自 docker compose，无需本地启动"
+    else
+        step 2 "启动 provider 并注册到 registry"
+        "$BIN/test1_rpc_server" > "$LOG_DIR/etcd_prov.log" 2>&1 &
+        PROV_PID=$!
+        sleep 3
+        info "provider 已注册 add 方法到 etcd"
+    fi
     info "etcd 中存储:"
     etcdctl get --prefix /lcz-rpc/ 2>/dev/null | head -8 || true
 
     # 杀 registry
-    step 3 "杀掉 registry 进程..."
-    kill $REG_PID 2>/dev/null || true
-    sleep 1
-    info "registry 已停止"
+    if $DOCKER_MODE; then
+        step 3 "停掉 registry 容器（docker-compose stop registry）"
+        cd "$COMPOSE_DIR" && docker-compose stop registry 2>&1 | tail -1
+        sleep 2
+        info "registry 容器已停止"
+    else
+        step 3 "杀掉 registry 进程..."
+        kill $REG_PID 2>/dev/null || true
+        sleep 1
+        info "registry 已停止"
+    fi
 
     # 重启 registry
-    step 4 "重启 registry，从 etcd 恢复数据"
-    "$BIN/test1_registry_server" > "$LOG_DIR/etcd_reg2.log" 2>&1 &
-    REG_PID=$!
-    sleep 2
-    info "registry 重启完成 (pid=$REG_PID)"
+    if $DOCKER_MODE; then
+        step 4 "重启 registry 容器（docker-compose start registry）"
+        cd "$COMPOSE_DIR" && docker-compose start registry 2>&1 | tail -1
+        sleep 3
+        info "registry 容器已从 etcd 恢复数据并重新监听"
+    else
+        step 4 "重启 registry，从 etcd 恢复数据"
+        "$BIN/test1_registry_server" > "$LOG_DIR/etcd_reg2.log" 2>&1 &
+        REG_PID=$!
+        sleep 2
+        info "registry 重启完成 (pid=$REG_PID)"
+    fi
 
     # 验证 client 仍能发现服务
     step 5 "client 发起调用，验证服务可发现"
@@ -80,7 +124,9 @@ demo_etcd() {
     info "etcd 数据:"
     etcdctl get --prefix /lcz-rpc/ 2>/dev/null | head -8 || true
 
-    kill $REG_PID $PROV_PID 2>/dev/null || true
+    if ! $DOCKER_MODE; then
+        kill $REG_PID $PROV_PID 2>/dev/null || true
+    fi
     echo -e "\n${GREEN}etcd HA 演示完成${NC}"
 }
 
@@ -137,25 +183,35 @@ demo_timeout() {
     TOTAL=4
     echo -e "${BOLD}=== 演示: 超时控制 ===${NC}"
     echo "场景: slow provider 执行 3s，client 设置 1s 超时"
-    echo "意义: 防止慢请求拖死调用方，超时立即返回不阻塞"
     echo ""
 
-    # 起 registry
-    step 1 "启动 registry"
-    "$BIN/test1_registry_server" > "$LOG_DIR/to_reg.log" 2>&1 &
-    REG_PID=$!
-    sleep 2
+    # 起 registry（复用 docker 已有的）
+    if compose_running registry || port_listening 8080; then
+        step 1 "复用已有 registry（端口 8080 已监听，跳过本地启动）"
+        REG_PID="SKIPPED"
+    else
+        step 1 "启动 registry"
+        "$BIN/test1_registry_server" > "$LOG_DIR/to_reg.log" 2>&1 &
+        REG_PID=$!
+        sleep 2
+    fi
 
-    # 起慢 provider（sleep 3s 再返回）
-    step 2 "启动慢 provider（add 延时 3s）"
+    # 起慢 provider（sleep 10s 再返回）
+    if compose_running provider || port_listening 8889; then
+        step 2 "端口 8889 已被占用（docker compose provider），跳过慢 provider 启动"
+        warn "本演示需要慢 provider 绑定 8889，与已有服务冲突"
+        warn "请先执行: docker-compose stop provider"
+        return 1
+    fi
+    step 2 "启动慢 provider（add 延时 10s）"
     "$BIN/test1_slow_rpc_server" > "$LOG_DIR/to_slow.log" 2>&1 &
     SLOW_PID=$!
     sleep 2
-    info "慢 provider 已注册 (每次调用睡眠 3s)"
+    info "慢 provider 已注册 (每次调用睡眠 10s)"
 
-    # 起 timeout client（1s 超时）
-    step 3 "client 设置 1s 超时，对比结果"
-    timeout 10 "$BIN/test1_timeout_test_client" > "$LOG_DIR/to_client.log" 2>&1 || true
+    # 起 timeout client（5s 超时）
+    step 3 "client 设置 5s 超时，对比结果"
+    timeout 15 "$BIN/test1_timeout_test_client" > "$LOG_DIR/to_client.log" 2>&1 || true
     sleep 2
 
     # 展示结果
@@ -163,7 +219,10 @@ demo_timeout() {
     echo -e "  ${CYAN}=== 超时 client 输出 ===${NC}"
     grep -E "超时|成功|失败|耗时|timeout" "$LOG_DIR/to_client.log" || cat "$LOG_DIR/to_client.log"
 
-    kill $REG_PID $SLOW_PID 2>/dev/null || true
+    if [ "$REG_PID" != "SKIPPED" ]; then
+        kill $REG_PID 2>/dev/null || true
+    fi
+    kill $SLOW_PID 2>/dev/null || true
     echo -e "\n${GREEN}超时控制演示完成${NC}"
 }
 
@@ -177,6 +236,12 @@ demo_circuit() {
     export LCZ_CB_FAILURE_THRESHOLD=5
     export LCZ_CB_OPEN_DURATION=8
     export LCZ_CB_HALF_OPEN_MAX=1
+
+    if compose_running provider || port_listening 8889; then
+        warn "端口 8889 已被占用（docker compose provider 正在运行），熔断器测试 server 无法绑定"
+        warn "请先执行: docker-compose stop provider"
+        return 1
+    fi
 
     step 1 "启动熔断器测试 server"
     "$BIN/circuit_breaker_test_server" > "$LOG_DIR/cb_server.log" 2>&1 &
@@ -276,12 +341,24 @@ demo_ha() {
     echo "意义: 注册中心本身挂了不影响服务，其他实例自动接管，外部无感知"
     echo ""
 
-    if ! pgrep -x etcd >/dev/null; then
+    if pgrep -x etcd >/dev/null 2>&1; then
+        info "etcd 进程已在宿主机运行"
+    elif curl -s http://127.0.0.1:2379/version >/dev/null 2>&1; then
+        info "etcd 端口 2379 已监听（可能是 docker 容器）"
+    else
         warn "请先启动 etcd: etcd --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379 &"
+        warn "或: docker compose up -d etcd"
         return 1
     fi
-    info "etcd 已在运行"
     export LCZ_ETCD=http://127.0.0.1:2379
+
+    # HA 演示需要启动 3 个本地进程共占同一端口（SO_REUSEPORT），与 docker compose 管理的 registry 互斥
+    if compose_running registry || port_listening 8080; then
+        warn "端口 8080 已被占用（docker compose registry 正在运行）"
+        warn "HA 演示需要同时启动 3 个本地 registry 实例共用 8080 端口，与已有服务冲突"
+        warn "请先执行: docker-compose stop registry"
+        return 1
+    fi
 
     # 记录每个实例的 pid，用于精确控制
     HA_PIDS=()
@@ -406,6 +483,24 @@ case "${1:-}" in
         demo_ha
         ;;
     all)
+        # 检测 docker compose 模式下哪些演示会冲突
+        if compose_running registry || compose_running provider; then
+            warn "检测到 docker compose 服务正在运行，以下演示会冲突："
+            compose_running registry && warn "  - demo_ha（需要单机启 3 个 registry 共占 8080 端口）"
+            compose_running provider && warn "  - demo_timeout（慢 provider 绑定 8889）"
+            compose_running provider && warn "  - demo_circuit（熔断测试 server 绑定 8889）"
+            echo ""
+            warn "建议先停掉 docker compose 再跑 all:"
+            warn "  docker-compose stop"
+            warn "  ./demo.sh all"
+            warn "  docker-compose start  # 跑完后恢复"
+            echo ""
+            info "也可以跳过冲突演示，只跑不冲突的:"
+            info "  ./demo.sh etcd      # 已适配 docker，会用 stop/start 控制容器"
+            info "  ./demo.sh offline   # 使用独立端口 7070，无冲突"
+            info "  ./demo.sh topic     # 使用独立端口 7070，无冲突"
+            exit 1
+        fi
         demo_etcd
         demo_offline
         demo_timeout
@@ -425,7 +520,11 @@ case "${1:-}" in
         echo "  ha      — 演示多实例 HA：3 个 registry 通过 etcd 选举 leader，杀 leader 后 follower 接管"
         echo "  all     — 全部跑一遍"
         echo ""
-        echo "  注意: etcd / ha 演示需要先启动 etcd 服务 (etcd --listen-client-urls=http://127.0.0.1:2379 &)"
+        echo "  注意: etcd / ha 演示需要先启动 etcd 服务"
+        echo "    宿主机模式: etcd --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379 &"
+        echo "    Docker 模式: docker-compose up -d etcd"
+        echo ""
+        echo "  all 模式与 docker compose 互斥，如 docker 服务在运行请先 docker-compose stop"
         echo "  日志: $LOG_DIR/"
         ;;
 esac

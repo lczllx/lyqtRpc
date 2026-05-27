@@ -8,6 +8,7 @@ add_library(lcz_registry_store STATIC
     server/etcd_leader_election.cpp
     server/memory_circuit_store.cpp
     server/etcd_circuit_store.cpp
+    server/async_circuit_store.cpp
     client/node_breaker.cpp
     client/circuit_breaker.cpp
 )

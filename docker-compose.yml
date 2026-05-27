@@ -48,6 +48,10 @@ services:
     command: /opt/rpc/bin/test1_rpc_server
     environment:
       LCZ_ETCD: http://etcd:2379
+      LCZ_REGISTRY_HOST: registry
+      LCZ_REGISTRY_PORT: "8080"
+      LCZ_PROVIDER_HOST: 127.0.0.1
+      LCZ_PROVIDER_PORT: "8889"
     ports:
       - "8889:8889"
 
