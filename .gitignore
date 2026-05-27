@@ -20,6 +20,9 @@ CLAUDE.md
 .DS_Store
 Thumbs.db
 
+# etcd 本地数据（运行产生，不提交）
+default.etcd/
+
 # 临时文件
 *.tmp
 *.log
