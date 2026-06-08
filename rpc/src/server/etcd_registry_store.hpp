@@ -43,6 +43,9 @@ namespace lcz_rpc
             bool http_txn_create_if_absent(const std::string &key,   // POST /v3/kv/txn → CAS compare version==0
                                            const std::string &value, //    成功则 put 并绑定 lease
                                            int64_t lease_id);        //    返回 succeeded 字段
+            bool http_put_with_lease(const std::string &key,         
+                                     const std::string &value,     
+                                     int64_t lease_id);
 
             void registerInstance(
                 const BaseConnection::ptr &conn,
@@ -75,7 +78,7 @@ namespace lcz_rpc
 
             static int load_from_value(const std::string &v); // 从 value JSON 解析 load
 
-            static int64_t ts_from_value(const std::string &v); // 从 value JSON 解析 ts
+            //static int64_t ts_from_value(const std::string &v); // 从 value JSON 解析 ts
         private:
             std::mutex _mutex;                     // 保护 _keys_by_conn_
             std::mutex _curl_mutex;                // 保护 _curl（libcurl 禁止同一句柄多线程并发）
@@ -87,6 +90,12 @@ namespace lcz_rpc
             // 记录每个连接写入过哪些 etcd key，断连时批量删除
             // 不需要随时通过连接查找provider，使用uintptr_t-不延长连接对象的生命周期
             std::unordered_map<uintptr_t, std::vector<std::string>> _keys_by_conn;
+
+            std::unordered_map<std::string, int64_t> _keys_to_lease; // provider的key绑定的lease_id
+            std::unordered_map<std::string, int64_t> _keys_to_load;  // provider的key绑定的load
+            std::unordered_map<std::string, uintptr_t> _keys_to_conn;   // provider的key绑定的conn
+        
+            std::unordered_set<std::string> _known_keys;//上次快照
         };
     }
 }
