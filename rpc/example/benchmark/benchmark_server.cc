@@ -26,19 +26,22 @@ static void heavy_compute_proto(const lcz_rpc::BaseConnection::ptr&, const Heavy
 
 int main(int argc, char* argv[])
 {
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    //lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
 
     int port = 8889;
     bool enable_discover = false;
     int registry_port = 8080;
+    int rate_limit = 0; // 0 表示不限流
 
     if (argc > 1) port = std::atoi(argv[1]);
     if (argc > 2) enable_discover = std::atoi(argv[2]) != 0;
     if (argc > 3) registry_port = std::atoi(argv[3]);
+    if (argc > 4) rate_limit = std::atoi(argv[4]);
 
     std::cout << "启动性能测试服务端（默认序列化: Protobuf）..." << std::endl;
     std::cout << "端口: " << port << std::endl;
     std::cout << "服务发现: " << (enable_discover ? "启用" : "禁用") << std::endl;
+    if (rate_limit > 0) std::cout << "限流: " << rate_limit << " req/s" << std::endl;
 
     lcz_rpc::server::RpcServer server(
         lcz_rpc::HostInfo("127.0.0.1", port),
@@ -48,6 +51,8 @@ int main(int argc, char* argv[])
     server.registerProtoHandler<AddRequest, AddResponse>("add", add_proto);
     server.registerProtoHandler<EchoRequest, EchoResponse>("echo", echo_proto);
     server.registerProtoHandler<HeavyRequest, HeavyResponse>("heavy_compute", heavy_compute_proto);
+
+    if (rate_limit > 0) server.setRateLimiter(rate_limit, rate_limit * 2);
 
     std::cout << "服务端启动成功，等待请求..." << std::endl;
     server.start();

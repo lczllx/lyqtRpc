@@ -206,6 +206,14 @@ namespace lcz_rpc
             // 启动服务器（阻塞）
             void start() { _server->start(); }
 
+            // 设置令牌桶限流器（对所有 RPC 入口生效），不设置则不限流
+            void setRateLimiter(int rate_per_sec, int burst)
+            {
+                auto limiter = std::make_shared<TokenBucket>(rate_per_sec, burst);
+                _rpc_router->setRateLimiter(limiter);
+                _proto_rpc_router->setRateLimiter(limiter);
+            }
+
             // 优雅退出：停止上报定时器 → 停止服务器 → 等待后台线程
             void stop()
             {

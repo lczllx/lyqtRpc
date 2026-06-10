@@ -99,6 +99,15 @@ namespace lcz_rpc
         {
             _data[KEY_RESULT] = result;
         }
+        // 服务端过载时建议客户端等待的毫秒数，0 表示未设置
+        int64_t retryAfterMs() const
+        {
+            return _data.get(KEY_RETRY_AFTER_MS, 0).asInt64();
+        }
+        void setRetryAfterMs(int64_t ms)
+        {
+            _data[KEY_RETRY_AFTER_MS] = static_cast<Json::Int64>(ms);
+        }
     };
     // RPC 请求消息类：携带 method、params，用于 RPC 调用
     class RpcRequest:public JsonRequest
@@ -555,8 +564,8 @@ namespace lcz_rpc
         std::string body() const { return _envelope.body(); }
         void setBody(const std::string& b) { _envelope.set_body(b); }
     private:
-        lcz_rpc::proto::RpcRequestEnvelope _envelope;
-        std::string _serialized;
+        lcz_rpc::proto::RpcRequestEnvelope _envelope; // protobuf 请求包体，包含 method + body
+        std::string _serialized;                       // 预序列化缓存，避免重复序列化
     };
 
     // 纯 Proto RPC 响应：线缆 body = RpcResponseEnvelope（rcode + bytes body），路径二
@@ -585,9 +594,13 @@ namespace lcz_rpc
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
         std::string body() const { return _envelope.body(); }
         void setBody(const std::string& b) { _envelope.set_body(b); }
+        // 服务端过载时建议退避毫秒数，0 表示未设置（非序列化，仅内存传递）
+        int64_t retryAfterMs() const { return _retry_after_ms; }
+        void setRetryAfterMs(int64_t ms) { _retry_after_ms = ms; }
     private:
-        lcz_rpc::proto::RpcResponseEnvelope _envelope;
-        std::string _serialized;
+        lcz_rpc::proto::RpcResponseEnvelope _envelope; // protobuf 响应包体，包含 rcode + body
+        std::string _serialized;                        // 预序列化缓存，避免重复序列化
+        int64_t _retry_after_ms = 0;                    // 服务端过载时建议退避毫秒数，0=未设置（非序列化）
     };
 
     // 纯 Proto 主题请求：与 TopicRequest 字段一致
@@ -673,8 +686,8 @@ namespace lcz_rpc
         int redundantCount() const { return _envelope.redundant(); }
         void setRedundantCount(int v) { _envelope.set_redundant(v); }
     private:
-        lcz_rpc::proto::TopicRequestEnvelope _envelope;
-        std::string _serialized;
+        lcz_rpc::proto::TopicRequestEnvelope _envelope; // protobuf 主题请求包体
+        std::string _serialized;                         // 预序列化缓存，避免重复序列化
     };
 
     // 纯 Proto 主题响应
@@ -704,8 +717,8 @@ namespace lcz_rpc
         std::string result() const { return _envelope.result(); }
         void setResult(const std::string& r) { _envelope.set_result(r); }
     private:
-        lcz_rpc::proto::TopicResponseEnvelope _envelope;
-        std::string _serialized;
+        lcz_rpc::proto::TopicResponseEnvelope _envelope; // protobuf 主题响应包体，包含 rcode + result
+        std::string _serialized;                           // 预序列化缓存，避免重复序列化
     };
 
     // 纯 Proto 服务请求：与 ServiceRequest 字段一致
@@ -760,8 +773,8 @@ namespace lcz_rpc
         int load() const { return _envelope.load(); }
         void setLoad(int v) { _envelope.set_load(v); }
     private:
-        lcz_rpc::proto::ServiceRequestEnvelope _envelope;
-        std::string _serialized;
+        lcz_rpc::proto::ServiceRequestEnvelope _envelope; // protobuf 服务请求包体
+        std::string _serialized;                           // 预序列化缓存，避免重复序列化
     };
 
     // 纯 Proto 服务响应：与 ServiceResponse 字段一致
@@ -839,8 +852,8 @@ namespace lcz_rpc
             }
         }
     private:
-        lcz_rpc::proto::ServiceResponseEnvelope _envelope;
-        std::string _serialized;
+        lcz_rpc::proto::ServiceResponseEnvelope _envelope; // protobuf 服务响应包体，包含 rcode + hosts + loads
+        std::string _serialized;                            // 预序列化缓存，避免重复序列化
     };
 
     // 消息工厂类：根据 MsgType 或模板类型创建具体消息对象

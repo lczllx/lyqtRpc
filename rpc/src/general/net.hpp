@@ -15,6 +15,8 @@
 #include <muduo/net/Buffer.h>//缓冲区
 #include <muduo/net/Callbacks.h>//回调函数
 #include <muduo/base/CountDownLatch.h>//倒计时器
+#include <thread>
+#include <chrono>
 #include <muduo/net/EventLoopThread.h>
 #include <muduo/base/Timestamp.h>
 
@@ -388,6 +390,7 @@ namespace lcz_rpc
              virtual void shutdown() override
              {
                _client.disconnect();
+               std::this_thread::sleep_for(std::chrono::milliseconds(200)); // 等事件循环处理完 Channel 移除再析构
              }
            // 通过已建立的连接发送消息，失败返回 false
            virtual bool send(const BaseMessage::ptr& msg) override

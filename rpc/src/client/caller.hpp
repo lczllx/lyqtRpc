@@ -227,6 +227,41 @@ namespace lcz_rpc
                     if (_breaker) _breaker->onFailure(method_name, host);
                     return false;
                 }
+                if (proto_resp->rcode() == RespCode::BACKOFF)
+                {
+                    int64_t wait_ms = proto_resp->retryAfterMs();
+                    if (wait_ms <= 0) wait_ms = 10; // 兜底 10ms
+                    LCZ_WARN("call_proto BACKOFF method=%s, 等待 %ldms 后重试一次", method_name.c_str(), wait_ms);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
+
+                    // 重试一次：重新构造请求再发
+                    auto retry_req = MessageFactory::create<ProtoRpcRequest>();
+                    retry_req->setId(uuid());
+                    retry_req->setMsgType(MsgType::REQ_RPC_PROTO);
+                    retry_req->setMethod(method_name);
+                    retry_req->setBody(body); // 复用已序列化的 body
+                    BaseMessage::ptr retry_resp;
+                    if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(retry_req), retry_resp, timeout))
+                    {
+                        LCZ_ERROR("call_proto BACKOFF 重试 send 失败");
+                        if (_breaker) _breaker->onFailure(method_name, host);
+                        return false;
+                    }
+                    proto_resp = std::dynamic_pointer_cast<ProtoRpcResponse>(retry_resp);
+                    if (!proto_resp)
+                    {
+                        LCZ_ERROR("call_proto BACKOFF 重试: response type not ProtoRpcResponse");
+                        if (_breaker) _breaker->onFailure(method_name, host);
+                        return false;
+                    }
+                    if (proto_resp->rcode() == RespCode::BACKOFF)
+                    {
+                        LCZ_ERROR("call_proto BACKOFF 重试再次被拒绝 method=%s", method_name.c_str());
+                        if (_breaker) _breaker->onFailure(method_name, host);
+                        return false;
+                    }
+                    // 重试后继续走 SUCCESS 校验路径
+                }
                 if (proto_resp->rcode() != RespCode::SUCCESS)
                 {
                     LCZ_ERROR("call_proto error: %s", errReason(proto_resp->rcode()).c_str());

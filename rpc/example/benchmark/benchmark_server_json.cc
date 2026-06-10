@@ -30,7 +30,7 @@ void echo(const Json::Value &req, Json::Value &resp)
 
 int main(int argc, char* argv[])
 {
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    //lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
 
     int port = 8889;
     bool enable_discover = false;

@@ -4,6 +4,7 @@
 #include "../general/dispacher.hpp"
 #include "../general/publicconfig.hpp"
 #include "../general/log_system/lcz_log.h"
+#include "../general/rate_limiter.hpp"
 #include <google/protobuf/message_lite.h>
 
 /*服务端对rpc请求的处理
@@ -161,9 +162,25 @@ namespace lcz_rpc{
             public:
             using ptr=std::shared_ptr<RpcRouter>;
             RpcRouter() : _manager(std::make_shared<ServiceManager>()) {}
+
+            // 设置令牌桶限流器，不设置则不限流
+            void setRateLimiter(TokenBucket::ptr limiter) { _rate_limiter = std::move(limiter); }
+
             // 处理 RPC 请求：查找服务、校验参数、调用回调、返回响应
             void onrpcRequst(const BaseConnection::ptr& conn,RpcRequest::ptr& req)
             {
+                // 令牌桶流控：桶空则拒绝并告知 client 多久后重试
+                if (_rate_limiter && !_rate_limiter->allow())
+                {
+                    LCZ_WARN("[RateLimiter-json] 桶空，拒绝 method=%s", req->method().c_str());
+                    auto resp = MessageFactory::create<RpcResponse>();
+                    resp->setId(req->rid());
+                    resp->setMsgType(lcz_rpc::MsgType::RSP_RPC);
+                    resp->setRcode(RespCode::BACKOFF);
+                    resp->setRetryAfterMs(_rate_limiter->retryAfterMs());
+                    conn->send(resp);
+                    return;
+                }
                 LCZ_DEBUG("RpcRouter recv method=%s", req->method().c_str());
                 auto service=_manager->select(req->method());
                 if(service.get()==nullptr)
@@ -200,6 +217,7 @@ namespace lcz_rpc{
             }
             private:
             ServiceManager::ptr _manager;
+            TokenBucket::ptr _rate_limiter;
         };
 
         // 路径二：纯 Proto RPC 路由器，按 method 派发到类型化 handler(conn, Req, Resp*)
@@ -207,9 +225,22 @@ namespace lcz_rpc{
         {
         public:
             using ptr = std::shared_ptr<ProtoRpcRouter>;
+
+            // 设置令牌桶限流器，不设置则不限流
+            void setRateLimiter(TokenBucket::ptr limiter) { _rate_limiter = std::move(limiter); }
+
             // 收到 Proto RPC 请求时调用：根据 method 查找并执行已注册的 proto handler
             void onProtoRequest(const BaseConnection::ptr& conn, ProtoRpcRequest::ptr& req)
             {
+                // 令牌桶流控：桶空则拒绝
+                if (_rate_limiter && !_rate_limiter->allow())
+                {
+                    const std::string& method = req->method();
+                    LCZ_WARN("[RateLimiter-proto] 桶空，拒绝 method=%s", method.c_str());
+                    sendProtoResponse(conn, req->rid(), RespCode::BACKOFF, "",
+                                      _rate_limiter->retryAfterMs());
+                    return;
+                }
                 const std::string& method = req->method();
                 const std::string& body = req->body();
                 const std::string& req_id = req->rid();
@@ -259,18 +290,20 @@ namespace lcz_rpc{
                 };
             }
             static void sendProtoResponse(const BaseConnection::ptr& conn, const std::string& req_id,
-                RespCode rcode, const std::string& body)
+                RespCode rcode, const std::string& body, int64_t retry_after_ms = 0)
             {
                 auto resp = MessageFactory::create<ProtoRpcResponse>();
                 resp->setId(req_id);
                 resp->setMsgType(MsgType::RSP_RPC_PROTO);
                 resp->setRcode(rcode);
                 resp->setBody(body);
+                if (retry_after_ms > 0) resp->setRetryAfterMs(retry_after_ms);
                 conn->send(resp);
             }
         private:
             using HandlerFn = std::function<void(const BaseConnection::ptr&, const std::string& body, const std::string& req_id)>;
             std::unordered_map<std::string, HandlerFn> _handlers;
+            TokenBucket::ptr _rate_limiter;
         };
     }
 }
