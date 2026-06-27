@@ -170,7 +170,7 @@ void throughput_test(lcz_rpc::client::RpcClient& client,
 
 int main(int argc, char* argv[])
 {
-    //lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
 
     std::string test_type = "single";  // single, multi, throughput
     std::string method = "add";

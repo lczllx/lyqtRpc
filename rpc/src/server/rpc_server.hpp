@@ -140,7 +140,7 @@ namespace lcz_rpc
                 auto proto_rpc_cb = std::bind(&lcz_rpc::server::ProtoRpcRouter::onProtoRequest, _proto_rpc_router.get(), std::placeholders::_1, std::placeholders::_2);
                 _dispacher->registerhandler<lcz_rpc::ProtoRpcRequest>(lcz_rpc::MsgType::REQ_RPC_PROTO, proto_rpc_cb);
                 //// 创建网络服务器实例
-                _server = lcz_rpc::ServerFactory::create(access_addr.second);
+                _server = lcz_rpc::ServerFactory::create(access_addr.second, 4);
                 // 设置消息处理回调
                 auto msg_cb = std::bind(&lcz_rpc::Dispacher::onMessage, _dispacher.get(), std::placeholders::_1, std::placeholders::_2);
                 _server->setMessageCallback(msg_cb);

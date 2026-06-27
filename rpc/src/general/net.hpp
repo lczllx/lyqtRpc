@@ -228,9 +228,11 @@ namespace lcz_rpc
       {
          public:
              using ptr = std::shared_ptr<MuduoServer>;
-            MuduoServer(const int port)
+            MuduoServer(const int port, int thread_cnt = 1)
             :_server(&_baseloop,muduo::net::InetAddress("0.0.0.0",port),"MuduoServer",muduo::net::TcpServer::kReusePort/*启用端口重用*/)
-            ,_protocol(ProtocolFactory::create()){}
+            ,_protocol(ProtocolFactory::create()){
+                if (thread_cnt > 1) _server.setThreadNum(thread_cnt);
+            }
              // 启动服务器并进入事件循环（阻塞）
             virtual void start() override
             {

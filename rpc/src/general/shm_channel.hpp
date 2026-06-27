@@ -1,0 +1,118 @@
+#pragma once
+
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+#include "log_system/lcz_log.h"
+
+#include <sys/mman.h>    // shm_open, mmap, munmap, shm_unlink
+#include <sys/stat.h>    // S_IRUSR, S_IWUSR（shm_open 权限）
+#include <fcntl.h>       // O_CREAT, O_RDWR, O_EXCL
+#include <unistd.h>      // ftruncate, close, unlink
+#include <sys/eventfd.h> // eventfd, EFD_NONBLOCK, EFD_SEMAPHORE
+#include <sys/socket.h>  // socket, bind, listen, accept, connect, sendmsg, recvmsg
+#include <sys/un.h>      // sockaddr_un, AF_UNIX
+#include <cstring>       // memcpy, strcpy
+#include <atomic>        // std::atomic, memory_order_*
+#include <cassert>       // static_assert
+#include <new>           // placement new
+#include <string>        // std::string
+#include <memory>        // std::shared_ptr
+
+#include "abstract.hpp"
+#include "message.hpp"
+#include "publicconfig.hpp"
+
+namespace lcz_rpc
+{
+    static constexpr size_t SHM_CTRL_SIZE = 4096;
+
+    struct ShmRingBuf
+    {
+        std::atomic<uint64_t> write_idx{0}; // 生产者独占写（谁写谁 load relaxed）
+        std::atomic<uint64_t> read_idx{0};  // 消费者独占写（对端 load acquire）
+        uint64_t data_size = 0;
+        uint32_t _pad;
+    };
+
+    /* 让 ShmControl 的起始地址一定是 64 的倍数，
+    让 atomic 操作不和无关数据挤在同一个 cache line 上*/
+    struct alignas(64) ShmControl
+    {
+        // Server create() 完成后 store(true, release)，Client 忙等 load(acquire)
+        std::atomic<bool> ready{false};
+
+        ShmRingBuf req_channel;  // Client→Server
+        ShmRingBuf resp_channel; // Server→Client
+    };
+    // 编译期断言，确保ShmControl没有奇怪的东西
+    static_assert(sizeof(ShmControl) <= 4096);
+    static_assert(alignof(ShmControl) == 64);
+    static_assert(sizeof(ShmRingBuf) == 32);
+
+    class ShmChannel
+    {
+    public:
+        using ptr = std::shared_ptr<ShmChannel>;
+
+        // ====== Server 端 ======
+        bool create(const std::string &name, size_t req_buf_size, size_t resp_buf_size);
+        //   shm_open(O_CREAT|O_RDWR, 0666)
+        //   → ftruncate(CTRL_SIZE + req_size + resp_size)
+        //   → mmap(MAP_SHARED)
+        //   → placement new ShmControl(_addr)
+        //   → ctrl->ready.store(true, release)
+
+        // ====== Client 端 ======
+        bool open(const std::string &name);
+        //   shm_open → fstat → mmap → while(!ready.load(acquire)) pause
+
+        // ====== 请求方向（Client → Server） ======
+        bool write_request(const std::string &body, MsgType type, int max_retries = 3);
+        bool read_request(std::string &body, MsgType &type);
+
+        // ====== 响应方向（Server → Client） ======
+        bool write_response(const std::string &body, MsgType type, int max_retries = 3);
+        bool read_response(std::string &body, MsgType &type);
+
+        // ====== 初始化握手（fd 传递） ======
+        bool setup_notify_server(const std::string &notify_path);
+        //   socket(AF_UNIX) → bind(listen_path) → listen → accept
+        //   → eventfd(EFD_SEMAPHORE) → sendmsg(SCM_RIGHTS) → recvmsg(SCM_RIGHTS)
+        //   → _req_notify_fd = 自己创建的, _resp_notify_fd = 收来的
+        //   → close(conn_fd)
+
+        bool setup_notify_client(const std::string &notify_path);
+        //   socket(AF_UNIX) → connect
+        //   → recvmsg(SCM_RIGHTS) 拿到 req_fd
+        //   → eventfd(EFD_SEMAPHORE) → sendmsg(SCM_RIGHTS)
+        //   → _req_notify_fd = 收来的, _resp_notify_fd = 自己创建的
+        //   → close(conn_fd)
+
+        int req_notify_fd() const { return _req_notify_fd; }   // Client→Server
+        int resp_notify_fd() const { return _resp_notify_fd; } // Server→Client
+
+        // ====== 缓冲指针（FlatBuffers 零拷贝写入用） ======
+        char *req_write_ptr(size_t &contig_avail);  // 请求 buffer 可写区起始 + 连续可用
+        char *resp_write_ptr(size_t &contig_avail); // 响应 buffer 可写区起始 + 连续可用
+        void req_commit(size_t frame_len);          // 写完提交游标 + write(notify_fd)
+
+        // ====== 生命周期 ======
+        bool is_open() const { return _addr != nullptr; }
+        void destroy(const std::string &name);
+        //   munmap → close(shm_fd) → close(req_notify_fd) → close(resp_notify_fd)
+        //   → shm_unlink(name) + unlink(notify_path) (仅 creator)
+
+    private:
+        int _shm_fd = -1; // shm_open 返回
+        void *_addr = nullptr; // mmap 返回的虚拟地址
+        ShmControl *_ctrl = nullptr; // = _addr（两个指针指向同一块内存的开头）
+        char *_req_data = nullptr;// = _addr + 4096
+        char *_resp_data = nullptr;// = _addr + 4096 + req_buf_size
+        size_t _total_size;
+        std::string _name;
+        int _req_notify_fd = -1;
+        int _resp_notify_fd = -1;
+        bool _is_creator = false;
+    };
+}

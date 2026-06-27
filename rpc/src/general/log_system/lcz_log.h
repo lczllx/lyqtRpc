@@ -30,3 +30,11 @@ inline Logger::ptr getrootLogger() {
 #define LCZ_WARN(fmt, ...)  lcz::getrootLogger()->Warn(__FILE__, static_cast<size_t>(__LINE__), fmt, ##__VA_ARGS__)
 #define LCZ_ERROR(fmt, ...) lcz::getrootLogger()->Error(__FILE__, static_cast<size_t>(__LINE__), fmt, ##__VA_ARGS__)
 #define LCZ_FATAL(fmt, ...) lcz::getrootLogger()->Fatal(__FILE__, static_cast<size_t>(__LINE__), fmt, ##__VA_ARGS__)
+
+// #define LCZ_DEBUG(fmt, ...) \
+//     if (lcz::LogLevel::value::DEBUG < lcz::getrootLogger()->l()) {} \
+//     else lcz::getrootLogger()->Debug(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+// #define LCZ_INFO(fmt, ...) \
+//     if (lcz::LogLevel::value::INFO < lcz::getrootLogger()->level()) {} \
+//     else lcz::getrootLogger()->Info(__FILE__, __LINE__, fmt, ##__VA_ARGS__)
