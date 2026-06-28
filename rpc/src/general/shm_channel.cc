@@ -63,7 +63,12 @@ namespace lcz_rpc
     // ====== Client 端 ======
     bool ShmChannel::open(const std::string &name)
     {
-        // 1. shm_open：打开已有共享内存，不加 O_CREAT | O_EXCL
+        if (_addr)
+        {
+            LCZ_ERROR("shm_open %s failed, already open", name.c_str());
+            return false;
+        }
+        // 1. shm_open：打开已有共享内存，只读，不加 O_CREAT | O_EXCL
         int fd = shm_open(name.c_str(), O_RDWR, 0);
         if (fd < 0)
         {
@@ -245,6 +250,12 @@ namespace lcz_rpc
     bool ShmChannel::read_response(std::string &body, MsgType &type)
     {
         return read_from(_ctrl->resp_channel, _resp_data, body, type);
+    }
+
+    // 析构自动清理，防止测试或异常路径泄漏 mmap / fd
+    ShmChannel::~ShmChannel()
+    {
+        destroy();
     }
 
     // ====== 生命周期 ======

@@ -98,6 +98,7 @@ namespace lcz_rpc
         void req_commit(size_t frame_len);          // 写完提交游标 + write(notify_fd)
 
         // ====== 生命周期 ======
+        ~ShmChannel();
         bool is_open() const { return _addr != nullptr; }
         void destroy();
         // munmap → close → shm_unlink（仅 creator）

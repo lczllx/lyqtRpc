@@ -14,6 +14,7 @@
 #   test_err_reason.cc         errReason 文案
 #   test_rate_limiter.cc        TokenBucket 令牌桶限流器
 #   test_serializer.cc          ISerializer / ProtobufSerializer 编解码
+#   test_shm_channel.cc         ShmChannel 共享内存单进程闭环
 # =============================================================================
 find_package(GTest REQUIRED CONFIG)
 
@@ -26,6 +27,7 @@ add_executable(lcz_rpc_unit_tests
   test_err_reason.cc
   test_rate_limiter.cc
   test_serializer.cc
+  test_shm_channel.cc
 )
 
 target_include_directories(lcz_rpc_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

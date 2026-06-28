@@ -23,6 +23,22 @@ target_link_libraries(lcz_registry_store
     CURL::libcurl
 )
 
+# SHM Transport（共享内存零拷贝通道）
+add_library(lcz_shm STATIC
+    general/shm_channel.cc
+)
+target_include_directories(lcz_shm
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../muduo>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/..>
+)
+target_link_libraries(lcz_shm
+  PUBLIC
+    lcz_rpc_proto
+    pthread
+)
+
 #接口库 不产出动静态库，只做为头文件路径和链接依赖的聚合目标
 add_library(lcz_rpc INTERFACE)
 
@@ -38,6 +54,7 @@ target_include_directories(lcz_rpc
 target_link_libraries(lcz_rpc
   INTERFACE
     lcz_registry_store
+    lcz_shm
     muduo_net
     muduo_base
     jsoncpp_lib
