@@ -37,6 +37,9 @@ target_link_libraries(lcz_rpc_unit_tests
     lcz_rpc
     GTest::gtest_main
 )
+set_target_properties(lcz_rpc_unit_tests PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
 
 include(GoogleTest)
 gtest_discover_tests(lcz_rpc_unit_tests)

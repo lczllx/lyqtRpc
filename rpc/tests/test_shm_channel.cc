@@ -12,6 +12,10 @@
 #include <chrono>
 
 #include "src/general/shm_channel.hpp"
+#include "src/general/shm_server.hpp"
+#include "src/general/shm_client.hpp"
+#include "src/general/shm_connection.hpp"
+#include "src/general/message.hpp"
 
 using lcz_rpc::ShmChannel;
 using lcz_rpc::MsgType;
@@ -19,11 +23,12 @@ using lcz_rpc::MsgType;
 class ShmChannelTest : public ::testing::Test {
 protected:
     void SetUp() override {
-        // 清理上次测试可能残留的文件
         shm_unlink("/test_shm_gtest");
+        shm_unlink("/lcz_shm_test");
     }
     void TearDown() override {
         shm_unlink("/test_shm_gtest");
+        shm_unlink("/lcz_shm_test");
     }
 };
 
@@ -203,5 +208,108 @@ TEST_F(ShmChannelTest, SimulatedCrossProcess) {
     EXPECT_EQ(body, "resp_from_server");
 
     server.destroy();
-    // client 不能调 destroy（会 double shm_unlink），直接关闭
+}
+
+// =============================================================================
+// §6 ShmConnection：虚拟连接句柄
+// =============================================================================
+
+// send() 将消息转发到注入的 _sender 回调
+TEST_F(ShmChannelTest, ShmConnectionSendDelegates) {
+    lcz_rpc::ShmConnection conn;
+    bool called = false;
+    conn.setSender([&](const lcz_rpc::BaseMessage::ptr&) { called = true; });
+
+    // 构造一个最简单的消息
+    auto msg = lcz_rpc::MessageFactory::create(lcz_rpc::MsgType::REQ_RPC);
+    conn.send(msg);
+    EXPECT_TRUE(called);
+}
+
+// connected() 始终为 true（SHM 通道打开即视为连接）
+TEST_F(ShmChannelTest, ShmConnectionAlwaysConnected) {
+    lcz_rpc::ShmConnection conn;
+    EXPECT_TRUE(conn.connected());
+}
+
+// peerAddress() 返回 shm:// 前缀的标识符
+TEST_F(ShmChannelTest, ShmConnectionPeerAddress) {
+    lcz_rpc::ShmConnection conn;
+    conn.setName("test_conn");
+    EXPECT_EQ(conn.peerAddress(), "shm://test_conn");
+}
+
+// =============================================================================
+// §7 ShmServer / ShmClient：完整 RPC 往返
+// =============================================================================
+
+// Server start + Client connect → send 请求 → Server 处理 → 回响应 → Client 收到
+TEST_F(ShmChannelTest, ServerClientRoundtrip) {
+    lcz_rpc::ShmServer server("lcz_shm_test", 1024 * 1024, 1024 * 1024);
+
+    // Server 收到请求后处理并返回响应
+    bool handled = false;
+    server.setMessageCallback([&](const lcz_rpc::BaseConnection::ptr& conn,
+                                   lcz_rpc::BaseMessage::ptr& msg) {
+        auto req = std::dynamic_pointer_cast<lcz_rpc::RpcRequest>(msg);
+        ASSERT_NE(req, nullptr);
+        EXPECT_EQ(req->method(), "add");
+
+        // 构造响应
+        int result = req->params()["num1"].asInt() + req->params()["num2"].asInt();
+        auto resp = lcz_rpc::MessageFactory::create<lcz_rpc::RpcResponse>();
+        resp->setId(req->rid());
+        resp->setMsgType(lcz_rpc::MsgType::RSP_RPC);
+        resp->setRcode(lcz_rpc::RespCode::SUCCESS);
+        resp->setResult(result);
+        conn->send(resp);
+        handled = true;
+    });
+
+    // 后台线程跑 server（start 阻塞在轮询）
+    std::thread server_thread([&]() { server.start(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Client 连接
+    lcz_rpc::ShmClient client("lcz_shm_test");
+    client.connect();
+    ASSERT_TRUE(client.connected());
+
+    // Client 设置响应回调
+    int result = 0;
+    bool got_response = false;
+    client.setMessageCallback([&](const lcz_rpc::BaseConnection::ptr&,
+                                   lcz_rpc::BaseMessage::ptr& msg) {
+        auto resp = std::dynamic_pointer_cast<lcz_rpc::RpcResponse>(msg);
+        if (resp && resp->rcode() == lcz_rpc::RespCode::SUCCESS) {
+            result = resp->result().asInt();
+            got_response = true;
+        }
+    });
+
+    // 发请求
+    auto req = lcz_rpc::MessageFactory::create<lcz_rpc::RpcRequest>();
+    req->setId("test-001");
+    req->setMsgType(lcz_rpc::MsgType::REQ_RPC);
+    req->setMethod("add");
+    Json::Value params;
+    params["num1"] = 10;
+    params["num2"] = 20;
+    req->setParams(params);
+    ASSERT_TRUE(client.send(req));
+
+    // 轮询等响应
+    auto start = std::chrono::steady_clock::now();
+    while (!got_response) {
+        client.pollResponse();
+        if (std::chrono::steady_clock::now() - start > std::chrono::seconds(2))
+            break;
+    }
+
+    EXPECT_TRUE(got_response);
+    EXPECT_EQ(result, 30);
+    EXPECT_TRUE(handled);
+
+    server.stop();
+    server_thread.join();
 }

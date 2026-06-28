@@ -9,4 +9,5 @@ target_link_libraries(despacher_client_test PRIVATE lcz_rpc)
 
 add_subdirectory(test)
 add_subdirectory(benchmark)
+add_subdirectory(shm)
 
