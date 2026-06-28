@@ -283,4 +283,161 @@ namespace lcz_rpc
         _req_data = nullptr;
         _resp_data = nullptr;
     }
+    // ====== SCM_RIGHTS 工具函数：跨进程传递文件描述符 ======
+    // 内核做的事：在目标进程的 fd 表中创建新条目，指向同一个 struct file
+    // 所以两个进程里的 fd 编号可以不同，但它们指向同一个 eventfd 内核对象
+
+    // 通过 Unix 域 socket 连接发送一个 fd 给对端进程
+    static void send_fd(int conn_fd, int fd_to_send)
+    {
+        char buf[1] = {'x'};                      // 至少 1 字节数据，否则 SCM_RIGHTS 不生效
+        struct iovec io = {buf, sizeof(buf)};
+
+        struct msghdr msg = {};
+        msg.msg_iov    = &io;
+        msg.msg_iovlen = 1;
+
+        // CMSG_SPACE 含对齐 padding，必须用 SPACE 不能用 CMSG_LEN
+        union {
+            struct cmsghdr hdr;
+            char buf[CMSG_SPACE(sizeof(int))];
+        } cbuf;
+
+        msg.msg_control    = &cbuf;
+        msg.msg_controllen = sizeof(cbuf);
+
+        struct cmsghdr *cmsg  = CMSG_FIRSTHDR(&msg);
+        cmsg->cmsg_level = SOL_SOCKET;
+        cmsg->cmsg_type  = SCM_RIGHTS;
+        cmsg->cmsg_len   = CMSG_LEN(sizeof(int));
+        memcpy(CMSG_DATA(cmsg), &fd_to_send, sizeof(int));
+
+        sendmsg(conn_fd, &msg, 0);
+        // 发送方可以关闭 fd——对端已在内核拿到新 fd，指向同一对象
+    }
+
+    // 从 Unix 域 socket 连接接收对端发来的 fd
+    static int recv_fd(int conn_fd)
+    {
+        char buf[1];
+        struct iovec io = {buf, sizeof(buf)};
+
+        struct msghdr msg = {};
+        msg.msg_iov    = &io;
+        msg.msg_iovlen = 1;
+
+        union {
+            struct cmsghdr hdr;
+            char buf[CMSG_SPACE(sizeof(int))];
+        } cbuf;
+
+        msg.msg_control    = &cbuf;
+        msg.msg_controllen = sizeof(cbuf);
+
+        recvmsg(conn_fd, &msg, 0);
+        int fd;
+        memcpy(&fd, CMSG_DATA(CMSG_FIRSTHDR(&msg)), sizeof(int));
+        return fd;
+    }
+
+    // ====== Server 端：bind + listen → accept → 交换 eventfd ======
+    // Server 创建 req_notify_fd，通过 Unix socket 发给 Client，
+    // 然后从同一连接收 Client 创建的 resp_notify_fd。
+    // 握手完成后 conn_fd 关闭，后续通知直接读写 eventfd。
+    bool ShmChannel::setup_notify_server(const std::string &notify_path)
+    {
+        // 1. 创建 Unix 域 socket，绑定到一个文件系统路径
+        int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (listen_fd < 0) {
+            LCZ_ERROR("setup_notify_server: socket failed errno=%d", errno);
+            return false;
+        }
+
+        struct sockaddr_un addr = {};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, notify_path.c_str(), sizeof(addr.sun_path) - 1);
+        unlink(notify_path.c_str());               // 清理上次残留的 socket 文件
+        if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            LCZ_ERROR("setup_notify_server: bind %s failed errno=%d", notify_path.c_str(), errno);
+            close(listen_fd);
+            return false;
+        }
+        if (listen(listen_fd, 1) < 0) {
+            LCZ_ERROR("setup_notify_server: listen failed errno=%d", errno);
+            close(listen_fd);
+            unlink(notify_path.c_str());
+            return false;
+        }
+
+        // 2. 阻塞等 Client 连上来
+        int conn_fd = accept(listen_fd, nullptr, nullptr);
+        if (conn_fd < 0) {
+            LCZ_ERROR("setup_notify_server: accept failed errno=%d", errno);
+            close(listen_fd);
+            unlink(notify_path.c_str());
+            return false;
+        }
+
+        // 3. 创建自己的 eventfd（Client 写完请求后 write 这个 fd 通知 Server）
+        _req_notify_fd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
+        if (_req_notify_fd < 0) {
+            LCZ_ERROR("setup_notify_server: eventfd failed errno=%d", errno);
+            close(conn_fd); close(listen_fd);
+            return false;
+        }
+
+        // 4. 把 req_notify_fd 发给 Client，收 Client 的 resp_notify_fd
+        send_fd(conn_fd, _req_notify_fd);
+        _resp_notify_fd = recv_fd(conn_fd);
+
+        // 5. 握手完成，关闭 Unix socket（eventfd 已独立可用）
+        close(conn_fd);
+        close(listen_fd);
+
+        LCZ_INFO("setup_notify_server: req_fd=%d resp_fd=%d", _req_notify_fd, _resp_notify_fd);
+        return true;
+    }
+
+    // ====== Client 端：connect → 交换 eventfd ======
+    bool ShmChannel::setup_notify_client(const std::string &notify_path)
+    {
+        // 1. 创建 Unix 域 socket 并连接 Server
+        int conn_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (conn_fd < 0) {
+            LCZ_ERROR("setup_notify_client: socket failed errno=%d", errno);
+            return false;
+        }
+
+        struct sockaddr_un addr = {};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, notify_path.c_str(), sizeof(addr.sun_path) - 1);
+        if (connect(conn_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+            LCZ_ERROR("setup_notify_client: connect %s failed errno=%d (server 是否已启动?)",
+                      notify_path.c_str(), errno);
+            close(conn_fd);
+            return false;
+        }
+
+        // 2. 收 Server 的 req_notify_fd
+        _req_notify_fd = recv_fd(conn_fd);
+
+        // 3. 创建自己的 eventfd（Server 写完响应后 write 这个 fd 通知 Client）
+        _resp_notify_fd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
+        if (_resp_notify_fd < 0) {
+            LCZ_ERROR("setup_notify_client: eventfd failed errno=%d", errno);
+            close(conn_fd);
+            return false;
+        }
+
+        // 4. 把自己的 resp_notify_fd 发给 Server
+        send_fd(conn_fd, _resp_notify_fd);
+
+        // 5. 握手完成
+        close(conn_fd);
+
+        LCZ_INFO("setup_notify_client: req_fd=%d resp_fd=%d", _req_notify_fd, _resp_notify_fd);
+        return true;
+    }
+
 } // namespace lcz_rpc
+

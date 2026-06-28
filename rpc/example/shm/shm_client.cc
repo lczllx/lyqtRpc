@@ -3,17 +3,19 @@
 // 编译: cd rpc && g++ -std=c++17 -I. -Ibuild example/shm/shm_client.cc \
 //         src/general/shm_channel.cc -lpthread -o build/bin/shm_client
 // ==================================================================
-#include "src/general/shm_client.hpp"
+#include "src/client/shm_client.hpp"
 #include "src/general/message.hpp"
 #include "src/general/detail.hpp"   // uuid()
 #include <iostream>
 #include <mutex>
+#include <condition_variable>
 
 int main() {
-    lcz_rpc::ShmClient client("lcz_shm");
+    lcz_rpc::ShmClient client("lcz_shm", "lcz_shm_notify");
 
-    // 收响应：匹配 rid
+    // 收响应：匹配 rid，用 condition_variable 等通知
     std::mutex mtx;
+    std::condition_variable cv;
     std::string expected_rid;
     int result = 0;
     bool got_response = false;
@@ -26,6 +28,7 @@ int main() {
         if (resp->rid() == expected_rid) {
             result = resp->result().asInt();
             got_response = true;
+            cv.notify_one();
             std::cout << "[client] recv response rid=" << resp->rid()
                       << " result=" << result << std::endl;
         }
@@ -60,11 +63,10 @@ int main() {
             continue;
         }
 
-        // 轮询等响应
-        while (true) {
-            client.pollResponse();
-            std::lock_guard<std::mutex> lk(mtx);
-            if (got_response) break;
+        // 等响应（后台 epoll 线程收到通知 → _cb_message 回调 → cv.notify）
+        {
+            std::unique_lock<std::mutex> lk(mtx);
+            cv.wait(lk, [&]{ return got_response; });
         }
     }
 

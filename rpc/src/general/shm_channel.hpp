@@ -92,6 +92,10 @@ namespace lcz_rpc
         int req_notify_fd() const { return _req_notify_fd; }   // Client→Server
         int resp_notify_fd() const { return _resp_notify_fd; } // Server→Client
 
+        // 写完数据后通知对端（Producer 调）
+        void notify_req()  { uint64_t one=1; if(_req_notify_fd>=0) ::write(_req_notify_fd,&one,8); }
+        void notify_resp() { uint64_t one=1; if(_resp_notify_fd>=0) ::write(_resp_notify_fd,&one,8); }
+
         // ====== 缓冲指针（FlatBuffers 零拷贝写入用） ======
         char *req_write_ptr(size_t &contig_avail);  // 请求 buffer 可写区起始 + 连续可用
         char *resp_write_ptr(size_t &contig_avail); // 响应 buffer 可写区起始 + 连续可用

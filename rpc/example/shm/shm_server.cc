@@ -3,7 +3,7 @@
 // 编译: cd rpc && g++ -std=c++17 -I. -Ibuild example/shm/shm_server.cc \
 //         src/general/shm_channel.cc -lpthread -o build/bin/shm_server
 // ==================================================================
-#include "src/general/shm_server.hpp"
+#include "src/server/shm_server.hpp"
 #include "src/general/message.hpp"
 #include <iostream>
 #include <signal.h>
@@ -14,7 +14,7 @@ int main() {
     signal(SIGINT,  [](int){ running = false; });
     signal(SIGTERM, [](int){ running = false; });
 
-    lcz_rpc::ShmServer server("lcz_shm", 64*1024*1024, 64*1024*1024);
+    lcz_rpc::ShmServer server("lcz_shm", "lcz_shm_notify", 64*1024*1024, 64*1024*1024);
 
     server.setMessageCallback([](const lcz_rpc::BaseConnection::ptr& conn,
                                   lcz_rpc::BaseMessage::ptr& msg) {

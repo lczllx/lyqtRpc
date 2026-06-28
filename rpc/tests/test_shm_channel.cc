@@ -12,8 +12,8 @@
 #include <chrono>
 
 #include "src/general/shm_channel.hpp"
-#include "src/general/shm_server.hpp"
-#include "src/general/shm_client.hpp"
+#include "src/server/shm_server.hpp"
+#include "src/client/shm_client.hpp"
 #include "src/general/shm_connection.hpp"
 #include "src/general/message.hpp"
 
@@ -245,47 +245,48 @@ TEST_F(ShmChannelTest, ShmConnectionPeerAddress) {
 
 // Server start + Client connect → send 请求 → Server 处理 → 回响应 → Client 收到
 TEST_F(ShmChannelTest, ServerClientRoundtrip) {
-    lcz_rpc::ShmServer server("lcz_shm_test", 1024 * 1024, 1024 * 1024);
+    lcz_rpc::ShmServer server("lcz_shm_test", "lcz_shm_test_notify", 1024*1024, 1024*1024);
 
-    // Server 收到请求后处理并返回响应
     bool handled = false;
+    std::mutex mtx;
+    std::condition_variable cv;
+    int result = 0;
+    bool got_response = false;
+
     server.setMessageCallback([&](const lcz_rpc::BaseConnection::ptr& conn,
                                    lcz_rpc::BaseMessage::ptr& msg) {
         auto req = std::dynamic_pointer_cast<lcz_rpc::RpcRequest>(msg);
         ASSERT_NE(req, nullptr);
         EXPECT_EQ(req->method(), "add");
 
-        // 构造响应
-        int result = req->params()["num1"].asInt() + req->params()["num2"].asInt();
+        int r = req->params()["num1"].asInt() + req->params()["num2"].asInt();
         auto resp = lcz_rpc::MessageFactory::create<lcz_rpc::RpcResponse>();
         resp->setId(req->rid());
         resp->setMsgType(lcz_rpc::MsgType::RSP_RPC);
         resp->setRcode(lcz_rpc::RespCode::SUCCESS);
-        resp->setResult(result);
+        resp->setResult(r);
         conn->send(resp);
         handled = true;
     });
 
-    // 后台线程跑 server（start 阻塞在轮询）
+    // 后台线程跑 server（start 阻塞在 epoll 事件循环）
     std::thread server_thread([&]() { server.start(); });
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-    // Client 连接
-    lcz_rpc::ShmClient client("lcz_shm_test");
-    client.connect();
-    ASSERT_TRUE(client.connected());
-
-    // Client 设置响应回调
-    int result = 0;
-    bool got_response = false;
+    // Client 连接（后台 epoll 线程自动收响应）
+    lcz_rpc::ShmClient client("lcz_shm_test", "lcz_shm_test_notify");
     client.setMessageCallback([&](const lcz_rpc::BaseConnection::ptr&,
                                    lcz_rpc::BaseMessage::ptr& msg) {
         auto resp = std::dynamic_pointer_cast<lcz_rpc::RpcResponse>(msg);
         if (resp && resp->rcode() == lcz_rpc::RespCode::SUCCESS) {
+            std::lock_guard<std::mutex> lk(mtx);
             result = resp->result().asInt();
             got_response = true;
+            cv.notify_one();
         }
     });
+    client.connect();
+    ASSERT_TRUE(client.connected());
 
     // 发请求
     auto req = lcz_rpc::MessageFactory::create<lcz_rpc::RpcRequest>();
@@ -298,15 +299,11 @@ TEST_F(ShmChannelTest, ServerClientRoundtrip) {
     req->setParams(params);
     ASSERT_TRUE(client.send(req));
 
-    // 轮询等响应
-    auto start = std::chrono::steady_clock::now();
-    while (!got_response) {
-        client.pollResponse();
-        if (std::chrono::steady_clock::now() - start > std::chrono::seconds(2))
-            break;
+    // 等 Client 后台线程收到响应
+    {
+        std::unique_lock<std::mutex> lk(mtx);
+        EXPECT_TRUE(cv.wait_for(lk, std::chrono::seconds(2), [&]{ return got_response; }));
     }
-
-    EXPECT_TRUE(got_response);
     EXPECT_EQ(result, 30);
     EXPECT_TRUE(handled);
 
