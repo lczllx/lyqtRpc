@@ -155,6 +155,13 @@ namespace lcz_rpc
                     static const uint32_t kSkip = 0;
                     memcpy(data_base + offset, &kSkip, 4);
                 }
+                else
+                {
+                    // 尾部 1-3 字节残留，手动清零。否则 Consumer 读 frame_len 时
+                    // 会跨 buffer 边界读到下一帧的数据，形成垃圾值
+                    static const char kZero[3] = {0, 0, 0};
+                    memcpy(data_base + offset, kZero, contig);
+                }
                 w += contig;
                 offset = 0;
                 // 跳过后重新检查
