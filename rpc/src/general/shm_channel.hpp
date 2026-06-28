@@ -99,11 +99,16 @@ namespace lcz_rpc
 
         // ====== 生命周期 ======
         bool is_open() const { return _addr != nullptr; }
-        void destroy(const std::string &name);
-        //   munmap → close(shm_fd) → close(req_notify_fd) → close(resp_notify_fd)
-        //   → shm_unlink(name) + unlink(notify_path) (仅 creator)
+        void destroy();
+        // munmap → close → shm_unlink（仅 creator）
 
     private:
+        // 内部读写，被四个公开方法委托
+        bool write_to(ShmRingBuf &ch, char *data_base,
+                      const std::string &body, MsgType type, int max_retries);
+        bool read_from(ShmRingBuf &ch, char *data_base,
+                       std::string &body, MsgType &type);
+
         int _shm_fd = -1; // shm_open 返回
         void *_addr = nullptr; // mmap 返回的虚拟地址
         ShmControl *_ctrl = nullptr; // = _addr（两个指针指向同一块内存的开头）
