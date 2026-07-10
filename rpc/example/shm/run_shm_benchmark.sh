@@ -38,17 +38,19 @@ MODE="${1:-all}"  # all / json / flat
 _SRV_PID=""
 start_server() {
     local srv="$1" shm="$2"
-    rm -f /dev/shm/$shm "$shm"*_notify 2>/dev/null || true
+    local notify_path="${shm}_notify"
+    rm -f /dev/shm/${shm}_* "$notify_path" 2>/dev/null || true
     "$srv" >/dev/null 2>&1 &
     _SRV_PID=$!
+    # 等 Unix socket 文件出现（服务端 bind+listen 之后才创建）
     for i in $(seq 1 30); do
-        if [ -f /dev/shm/$shm ] 2>/dev/null; then
+        if [ -S "$notify_path" ] 2>/dev/null; then
             return 0
         fi
         sleep 0.1
     done
     kill $_SRV_PID 2>/dev/null || true
-    echo -e "${YELLOW}[ERROR] 服务端启动超时 (30×0.1s): SHM /dev/shm/$shm 未创建${NC}" >&2
+    echo -e "${YELLOW}[ERROR] 服务端启动超时: socket $notify_path 未创建${NC}" >&2
     _SRV_PID=""
     return 1
 }
@@ -61,7 +63,7 @@ stop_server() {
         wait $_SRV_PID 2>/dev/null || true
         _SRV_PID=""
     fi
-    rm -f /dev/shm/$shm "$shm"*_notify 2>/dev/null || true
+    rm -f /dev/shm/${shm}_* "${shm}"*_notify 2>/dev/null || true
 }
 
 # 单轮测试: 启动服务端 → 跑测试 → 停止服务端
@@ -119,23 +121,38 @@ run_flat_bench() {
     run_one_round "[吞吐量]" "$SRV" "$CLI" "$SHM_NAME" throughput add 0 0 10
 }
 
+# ========== 载荷大小对比（echo 字符串，JSON vs FlatBuf ZC） ==========
+run_payload_compare() {
+    local JSON_SRV="$BIN_DIR/shm_benchmark_server"
+    local JSON_CLI="$BIN_DIR/shm_benchmark_client"
+    local FLAT_SRV="$BIN_DIR/shm_benchmark_server_zc"
+    local FLAT_CLI="$BIN_DIR/shm_benchmark_client_zc"
+    local REQ=5000  # 较少请求数，大载荷下耗时更长
+
+    for sz in 64 1024 65536; do
+        local label="$sz B"
+        if [ "$sz" -ge 1024 ]; then label="$((sz/1024)) KB"; fi
+
+        echo -e "\n${BOLD}${CYAN}══════════ 载荷: $label ══════════${NC}"
+
+        if [ -f "$JSON_SRV" ] && [ -f "$JSON_CLI" ]; then
+            run_one_round "  JSON    echo $label" "$JSON_SRV" "$JSON_CLI" "lcz_shm_bench"     single echo $REQ 0 0 $sz
+        fi
+        if [ -f "$FLAT_SRV" ] && [ -f "$FLAT_CLI" ]; then
+            run_one_round "  FlatBuf echo $label" "$FLAT_SRV" "$FLAT_CLI" "lcz_shm_bench_zc"  single echo $REQ 0 0 $sz
+        fi
+    done
+}
+
 # ====== 执行 ======
 case "$MODE" in
     json)  run_json_bench ;;
     flat)  run_flat_bench ;;
+    cmp)   run_payload_compare ;;
     all)
         run_json_bench
         run_flat_bench
-        echo ""
-        echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
-        echo -e "${BOLD}${CYAN}║  JSON vs FlatBuffers 零拷贝 对比完成！                   ║${NC}"
-        echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+        run_payload_compare
         ;;
-    *) echo "用法: bash run_shm_benchmark.sh [json|flat|all]" ;;
+    *) echo "用法: bash run_shm_benchmark.sh [json|flat|cmp|all]" ;;
 esac
-
-echo ""
-echo -e "${YELLOW}对比参考:${NC}"
-echo -e "  TCP Proto 4线程: QPS ~39,246  P50 ~92μs"
-echo -e "  SHM JSON:         QPS > TCP  P50 3-15μs"
-echo -e "  SHM FlatBuf ZC:   QPS > JSON P50 <5μs (零拷贝)"

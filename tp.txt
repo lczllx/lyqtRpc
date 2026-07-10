@@ -1,191 +1,272 @@
-cz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/rpc/RPC/rpc/build$ ./bin/benchmark_client single add 10000
-========== RPC 性能测试（默认 Protobuf）==========
-测试类型: single
-方法名: add
-服务器: 127.0.0.1:8889
-使用服务发现: 否
-[21:03:29][140271691213888][root_logger][/home/lcz/dev_version/rpc/RPC/rpc/example/benchmark/../../src/client/rpc_client.hpp:291][INFO]   [RpcClient] 使用内存存储断路器状态
-20260609 13:03:29.932300Z  5619 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x563527615E50 - TcpClient.cc:69
-20260609 13:03:29.932325Z  5619 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
-连接成功，开始性能测试...
-单线程测试，请求数: 10000
 
-========== 性能测试结果（Protobuf 序列化）==========
-总请求数: 10000
-成功请求: 10000
-失败请求: 0
-成功率: 100.00%
-测试时长: 1168 ms
-QPS: 8561.64
+=== Protobuf 小 payload (add) 并发梯度 ===
+线程   QPS          P50(us)      P99(us)      P999(us)     成功率
+----     ----         -------      -------      --------     -----   
+1        11235.96     86.00        140.00       358.00       100.00% 
+4        37147.10     97.00        194.00       529.00       100.00% 
+8        46425.26     148.00       338.00       749.00       100.00% 
+16       43140.64     319.00       630.00       2978.00      100.00% 
 
-延迟统计 (微秒):
-  最小值: 85.00 us
-  平均值: 116.00 us
-  P50:    114.00 us
-  P90:    135.00 us
-  P95:    143.00 us
-  P99:    164.00 us
-  最大值: 621.00 us
-==================================
+=== JSON 小 payload (add) 并发梯度 ===
+线程   QPS          P50(us)      P99(us)      P999(us)     成功率
+----     ----         -------      -------      --------     -----   
+1        8735.15      108.00       183.00       450.00       100.00% 
+4        27100.27     133.00       273.00       1043.00      100.00% 
+8        32743.94     214.00       498.00       1551.00      100.00% 
+16       39277.30     358.00       686.00       3366.00      100.00% 
 
-20260609 13:03:31.204754Z  5619 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x563527615E50 - TcpClient.cc:75
-lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/rpc/RPC/rpc/build$ ./bin/benchmark_client multi add 50000 8
-========== RPC 性能测试（默认 Protobuf）==========
-测试类型: multi
-方法名: add
-服务器: 127.0.0.1:8889
-使用服务发现: 否
-[21:03:43][140198760266816][root_logger][/home/lcz/dev_version/rpc/RPC/rpc/example/benchmark/../../src/client/rpc_client.hpp:291][INFO]   [RpcClient] 使用内存存储断路器状态
-20260609 13:03:43.925879Z  5681 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x55DF4A6FFE50 - TcpClient.cc:69
-20260609 13:03:43.925901Z  5681 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
-连接成功，开始性能测试...
-多线程测试，线程数: 8, 总请求数: 50000
+=== 大 payload (echo 100KB x 1000) 对比 ===
+序列化    QPS          P50(us)      P99(us)      P999(us)     P99(ms)     
+------       ----         -------      -------      --------     ------      
+Protobuf     1377.41      668.00       1000.00      4625.00      1.00ms      
+JSON         492.61       1997.00      2640.00      5988.00      2.64ms      
 
-========== 性能测试结果（Protobuf 序列化）==========
-总请求数: 50000
-成功请求: 50000
-失败请求: 0
-成功率: 100.00%
-测试时长: 1714 ms
-QPS: 29171.53
+=== 吞吐量 10s 持续压测 ===
+序列化    QPS          P50(us)      P99(us)      P999(us)    
+------       ----         -------      -------      --------    
+Protobuf     11645.80     83.00        132.00       279.00      
+JSON         9091.20      106.00       176.00       434.00      
 
-延迟统计 (微秒):
-  最小值: 90.00 us
-  平均值: 256.82 us
-  P50:    232.00 us
-  P90:    350.00 us
-  P95:    402.00 us
-  P99:    602.00 us
-  最大值: 42162.00 us
-==================================
 
-20260609 13:03:45.756535Z  5681 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x55DF4A6FFE50 - TcpClient.cc:75
-lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/rpc/RPC/rpc/build$ ./bin/benchmark_client throughput add 0 0 30
-========== RPC 性能测试（默认 Protobuf）==========
-测试类型: throughput
-方法名: add
-服务器: 127.0.0.1:8889
-使用服务发现: 否
-[21:03:53][139666890366016][root_logger][/home/lcz/dev_version/rpc/RPC/rpc/example/benchmark/../../src/client/rpc_client.hpp:291][INFO]   [RpcClient] 使用内存存储断路器状态
-20260609 13:03:53.063171Z  5755 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x55BB294A2E50 - TcpClient.cc:69
-20260609 13:03:53.063221Z  5755 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
-连接成功，开始性能测试...
-吞吐量测试，持续时间: 30 秒
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/example/shm$ bash run_shm_benchmark.sh 
 
-========== 性能测试结果（Protobuf 序列化）==========
-总请求数: 265925
-成功请求: 265925
-失败请求: 0
-成功率: 100.00%
-测试时长: 30000 ms
-QPS: 8864.17
+╔══════════════════════════════════════════════════════════╗
+║    SHM JSON 序列化 RPC 性能测试                          ║
+╚══════════════════════════════════════════════════════════╝
 
-延迟统计 (微秒):
-  最小值: 82.00 us
-  平均值: 112.00 us
-  P50:    109.00 us
-  P90:    130.00 us
-  P95:    139.00 us
-  P99:    177.00 us
-  最大值: 3666.00 us
-==================================
+[单线程]: single (add, 20000次)
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: single  方法: add
 
-20260609 13:04:23.272562Z  5755 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x55BB294A2E50 - TcpClient.cc:75
+========== SHM RPC 性能测试结果 ==========
+总请求: 20000  成功: 20000  失败: 0  成功率: 100.00%
+耗时: 1756 ms  QPS: 11389.52
 
-lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/rpc/RPC/build$ ./bin/benchmark_client multi add 50000 8
-========== RPC 性能测试（默认 Protobuf）==========
-测试类型: multi
-方法名: add
-服务器: 127.0.0.1:8889
-使用服务发现: 否
-20260609 13:04:35.475902Z  5917 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x55AE6CA6AAB0 - TcpClient.cc:69
-20260609 13:04:35.475923Z  5917 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
-连接成功，开始性能测试...
-多线程测试，线程数: 8, 总请求数: 50000
+延迟 (微秒):
+  Min:  31.00 us
+  P50:  45.00 us
+  P90:  69.00 us
+  P95:  77.00 us
+  P99:  119.00 us
+  P999: 934.00 us
+  Max:  9502.00 us
+==========================================
 
-========== 性能测试结果（Protobuf 序列化）==========
-总请求数: 50000
-成功请求: 50000
-失败请求: 0
-成功率: 100.00%
-测试时长: 1707 ms
-QPS: 29291.15
 
-延迟统计 (微秒):
-  最小值: 91.00 us
-  平均值: 260.15 us
-  P50:    243.00 us
-  P90:    341.00 us
-  P95:    391.00 us
-  P99:    521.00 us
-  最大值: 44905.00 us
-==================================
+[多线程]: multi (add, 20000次)
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: multi  方法: add
 
-20260609 13:04:37.300622Z  5917 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x55AE6CA6AAB0 - TcpClient.cc:75
+========== SHM RPC 性能测试结果 ==========
+总请求: 20000  成功: 20000  失败: 0  成功率: 100.00%
+耗时: 962 ms  QPS: 20790.02
 
-lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/rpc/RPC/rpc/build$ ./bin/benchmark_client multi add 50000 8
-========== RPC 性能测试（默认 Protobuf）==========
-测试类型: multi
-方法名: add
-服务器: 127.0.0.1:8889
-使用服务发现: 否
-[21:06:23][140489030220864][root_logger][/home/lcz/dev_version/rpc/RPC/rpc/example/benchmark/../../src/client/rpc_client.hpp:291][INFO] [RpcClient] 使用内存存储断路器状态
-20260609 13:06:23.401598Z  6185 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x5605085FAE50 - TcpClient.cc:69
-20260609 13:06:23.401646Z  6185 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
-连接成功，开始性能测试...
-多线程测试，线程数: 8, 总请求数: 50000
+延迟 (微秒):
+  Min:  32.00 us
+  P50:  54.00 us
+  P90:  93.00 us
+  P95:  109.00 us
+  P99:  134.00 us
+  P999: 626.00 us
+  Max:  12140.00 us
+==========================================
 
-========== 性能测试结果（Protobuf 序列化）==========
-总请求数: 50000
-成功请求: 50000
-失败请求: 0
-成功率: 100.00%
-测试时长: 1577 ms
-QPS: 31705.77
 
-延迟统计 (微秒):
-  最小值: 86.00 us
-  平均值: 241.01 us
-  P50:    222.00 us
-  P90:    320.00 us
-  P95:    368.00 us
-  P99:    532.00 us
-  最大值: 43991.00 us
-==================================
+[吞吐量]: throughput (add, 0次)
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: throughput  方法: add
 
-20260609 13:06:25.096366Z  6185 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x5605085FAE50 - TcpClient.cc:75
+========== SHM RPC 性能测试结果 ==========
+总请求: 141955  成功: 141955  失败: 0  成功率: 100.00%
+耗时: 10000 ms  QPS: 14195.50
 
-lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/rpc/RPC/build$ ./bin/benchmark_client multi add 50000 8 0 1 127.0.0.1 0 8080
-========== RPC 性能测试（默认 Protobuf）==========
-测试类型: multi
-方法名: add
-服务器: 127.0.0.1:0
-使用服务发现: 是
-20260609 13:10:15.772900Z  6851 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x563211BBC470 - TcpClient.cc:69
-20260609 13:10:15.772922Z  6851 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8080 - TcpClient.cc:107
-20260609 13:10:15.876858Z  6851 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x563211BBD6F0 - TcpClient.cc:69
-20260609 13:10:15.876891Z  6851 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
-连接成功，开始性能测试...
-多线程测试，线程数: 8, 总请求数: 50000
+延迟 (微秒):
+  Min:  33.00 us
+  P50:  57.00 us
+  P90:  70.00 us
+  P95:  76.00 us
+  P99:  99.00 us
+  P999: 260.00 us
+  Max:  3354.00 us
+==========================================
 
-========== 性能测试结果（Protobuf 序列化）==========
-总请求数: 50000
-成功请求: 50000
-失败请求: 0
-成功率: 100.00%
-测试时长: 1743 ms
-QPS: 28686.17
 
-延迟统计 (微秒):
-  最小值: 110.00 us
-  平均值: 268.30 us
-  P50:    241.00 us
-  P90:    374.00 us
-  P95:    433.00 us
-  P99:    610.00 us
-  最大值: 40606.00 us
-==================================
+╔══════════════════════════════════════════════════════════╗
+║  SHM FlatBuffers 零拷贝 RPC 性能测试                     ║
+╚══════════════════════════════════════════════════════════╝
 
-20260609 13:10:17.637038Z  6851 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x563211BBC470 - TcpClient.cc:75
-benchmark_client: /home/lcz/dev_version/rpc/RPC/rpc/muduo/muduo/net/Channel.cc:40: muduo::net::Channel::~Channel(): Assertion `!addedToLoop_' failed.
-Aborted (core dumped)
+[单线程]: single (add, 20000次)
+========== SHM FlatBuffers 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: add
+
+========== SHM FlatBuffers 零拷贝 RPC 性能测试结果 ==========
+总请求: 20000  成功: 20000  失败: 0  成功率: 100.00%
+耗时: 1910 ms  QPS: 10471.20
+
+延迟 (微秒):
+  Min:  28.00 us
+  P50:  47.00 us
+  P90:  66.00 us
+  P95:  74.00 us
+  P99:  173.00 us
+  P999: 2197.00 us
+  Max:  5037.00 us
+==========================================
+
+
+[多线程]: multi (add, 20000次)
+========== SHM FlatBuffers 零拷贝 RPC 性能测试 ==========
+测试类型: multi  方法: add
+
+========== SHM FlatBuffers 零拷贝 RPC 性能测试结果 ==========
+总请求: 20000  成功: 20000  失败: 0  成功率: 100.00%
+耗时: 905 ms  QPS: 22099.45
+
+延迟 (微秒):
+  Min:  28.00 us
+  P50:  52.00 us
+  P90:  77.00 us
+  P95:  87.00 us
+  P99:  126.00 us
+  P999: 274.00 us
+  Max:  3375.00 us
+==========================================
+
+
+[吞吐量]: throughput (add, 0次)
+========== SHM FlatBuffers 零拷贝 RPC 性能测试 ==========
+测试类型: throughput  方法: add
+
+========== SHM FlatBuffers 零拷贝 RPC 性能测试结果 ==========
+总请求: 151172  成功: 151172  失败: 0  成功率: 100.00%
+耗时: 10000 ms  QPS: 15117.20
+
+延迟 (微秒):
+  Min:  29.00 us
+  P50:  53.00 us
+  P90:  64.00 us
+  P95:  69.00 us
+  P99:  92.00 us
+  P999: 236.00 us
+  Max:  3222.00 us
+==========================================
+
+
+══════════ 载荷: 64 B ══════════
+
+  JSON    echo 64 B: single (echo, 5000次)
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 64B
+
+========== SHM RPC 性能测试结果 ==========
+总请求: 5000  成功: 5000  失败: 0  成功率: 100.00%
+耗时: 860 ms  QPS: 5813.95
+
+延迟 (微秒):
+  Min:  36.00 us
+  P50:  54.00 us
+  P90:  73.00 us
+  P95:  81.00 us
+  P99:  112.00 us
+  P999: 848.00 us
+  Max:  4797.00 us
+==========================================
+
+
+  FlatBuf echo 64 B: single (echo, 5000次)
+========== SHM FlatBuffers 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 64B
+
+========== SHM FlatBuffers 零拷贝 RPC 性能测试结果 ==========
+总请求: 5000  成功: 5000  失败: 0  成功率: 100.00%
+耗时: 881 ms  QPS: 5675.37
+
+延迟 (微秒):
+  Min:  28.00 us
+  P50:  57.00 us
+  P90:  74.00 us
+  P95:  83.00 us
+  P99:  176.00 us
+  P999: 1278.00 us
+  Max:  4195.00 us
+==========================================
+
+
+══════════ 载荷: 1 KB ══════════
+
+  JSON    echo 1 KB: single (echo, 5000次)
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 1024B
+
+========== SHM RPC 性能测试结果 ==========
+总请求: 5000  成功: 5000  失败: 0  成功率: 100.00%
+耗时: 952 ms  QPS: 5252.10
+
+延迟 (微秒):
+  Min:  53.00 us
+  P50:  74.00 us
+  P90:  89.00 us
+  P95:  97.00 us
+  P99:  147.00 us
+  P999: 616.00 us
+  Max:  3293.00 us
+==========================================
+
+
+  FlatBuf echo 1 KB: single (echo, 5000次)
+========== SHM FlatBuffers 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 1024B
+
+========== SHM FlatBuffers 零拷贝 RPC 性能测试结果 ==========
+总请求: 5000  成功: 5000  失败: 0  成功率: 100.00%
+耗时: 875 ms  QPS: 5714.29
+
+延迟 (微秒):
+  Min:  38.00 us
+  P50:  61.00 us
+  P90:  79.00 us
+  P95:  85.00 us
+  P99:  116.00 us
+  P999: 409.00 us
+  Max:  1302.00 us
+==========================================
+
+
+══════════ 载荷: 64 KB ══════════
+
+  JSON    echo 64 KB: single (echo, 5000次)
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 65536B
+
+========== SHM RPC 性能测试结果 ==========
+总请求: 5000  成功: 5000  失败: 0  成功率: 100.00%
+耗时: 6430 ms  QPS: 777.60
+
+延迟 (微秒):
+  Min:  764.00 us
+  P50:  1143.00 us
+  P90:  1380.00 us
+  P95:  1439.00 us
+  P99:  1540.00 us
+  P999: 2320.00 us
+  Max:  3484.00 us
+==========================================
+
+
+  FlatBuf echo 64 KB: single (echo, 5000次)
+========== SHM FlatBuffers 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 65536B
+
+========== SHM FlatBuffers 零拷贝 RPC 性能测试结果 ==========
+总请求: 5000  成功: 5000  失败: 0  成功率: 100.00%
+耗时: 6913 ms  QPS: 723.27
+
+延迟 (微秒):
+  Min:  907.00 us
+  P50:  1220.00 us
+  P90:  1462.00 us
+  P95:  1522.00 us
+  P99:  1741.00 us
+  P999: 3948.00 us
+  Max:  10536.00 us
+==========================================

@@ -12,7 +12,7 @@
 
 int main() {
     lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
-    lcz_rpc::ShmClient client("lcz_shm", "lcz_shm_notify");
+    lcz_rpc::ShmClient client("lcz_shm_notify");
 
     // 收响应：匹配 rid，用 condition_variable 等通知
     std::mutex mtx;

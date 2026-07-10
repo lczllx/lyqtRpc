@@ -1,13 +1,12 @@
 #pragma once
 // =============================================================================
-// shm_server.hpp — 共享内存 Transport Server 端，实现 BaseServer
-// -----------------------------------------------------------------------------
+// shm_server.hpp — SHM Server，worker 线程池（每 worker 独立 epoll）
+// =============================================================================
 // start() 流程：
-//   1. ShmChannel::create() 创建共享内存 + 双 ring buffer
-//   2. setup_notify_server() 握手交换 eventfd（SCM_RIGHTS 跨进程传 fd）
-//   3. epoll 监听 req_notify_fd，收到信号 → drain_requests → _cb_message 派发
-//   4. _cb_message 回调中 Router 处理业务 → conn->send(resp)
-//      → ShmConnection::send() → write_response + write(resp_notify_fd) 通知 Client
+//   1. bind + listen Unix socket
+//   2. 启动 N 个 worker 线程，每个独立 epoll 循环
+//   3. 主线程 accept → handshake → round-robin 分配给 worker
+//   4. worker 通过 pipe 收到新客户端 req_fd → 加入 epoll → read_request → 派发
 // =============================================================================
 
 #include "../general/abstract.hpp"
@@ -16,97 +15,219 @@
 #include "../general/message.hpp"
 #include "../general/log_system/lcz_log.h"
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <atomic>
+#include <thread>
+#include <vector>
+#include <unordered_map>
+#include <mutex>
 
 namespace lcz_rpc {
 
 class ShmServer : public BaseServer {
 public:
-    ShmServer(const std::string& shm_name = "lcz_shm",
-              const std::string& notify_path = "lcz_shm_notify",
+    ShmServer(const std::string& notify_path = "lcz_shm_notify",
+              const std::string& shm_prefix  = "lcz_shm",
               size_t req_size  = 64 * 1024 * 1024,
-              size_t resp_size = 64 * 1024 * 1024)
-        : _shm_name(shm_name), _notify_path(notify_path),
-          _req_size(req_size), _resp_size(resp_size) {}
+              size_t resp_size = 64 * 1024 * 1024,
+              int    max_clients = 64,
+              int    worker_threads = 4)
+        : _notify_path(notify_path), _shm_prefix(shm_prefix),
+          _req_size(req_size), _resp_size(resp_size),
+          _max_clients(max_clients), _worker_count(worker_threads) {}
 
     void start() override {
-        // 1. 创建共享内存 + 控制区 + 双 ring buffer
-        if (!_channel.create(_shm_name, _req_size, _resp_size)) {
-            LCZ_ERROR("[ShmServer] create failed"); return;
+        // 1. bind + listen
+        int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (listen_fd < 0) {
+            LCZ_ERROR("[ShmServer] socket failed errno=%d", errno); return;
+        }
+        struct sockaddr_un addr = {};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, _notify_path.c_str(), sizeof(addr.sun_path) - 1);
+        unlink(_notify_path.c_str());
+        if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            LCZ_ERROR("[ShmServer] bind failed errno=%d", errno);
+            close(listen_fd); return;
+        }
+        if (listen(listen_fd, _max_clients) < 0) {
+            LCZ_ERROR("[ShmServer] listen failed errno=%d", errno);
+            close(listen_fd); return;
         }
 
-        // 2. Unix 域 socket 握手，交换 eventfd
-        if (!_channel.setup_notify_server(_notify_path)) {
-            LCZ_ERROR("[ShmServer] notify setup failed");
-            _channel.destroy(); return;
-        }
-
-        // 3. 构造虚拟连接：Router 调 conn->send(resp) → 写响应 + 通知 Client
-        auto conn = std::make_shared<ShmConnection>();
-        conn->setName("shm_server");
-        conn->setSender([this](const BaseMessage::ptr& msg) {
-            std::string body = msg->serialize();
-            LCZ_DEBUG("[ShmServer] conn->send: type=%d body_len=%zu", static_cast<int>(msg->msgType()), body.size());
-            bool ok = _channel.write_response(body, msg->msgType());
-            LCZ_DEBUG("[ShmServer] write_response ok=%d, notifying client via resp_fd=%d", ok, _channel.resp_notify_fd());
-            _channel.notify_resp();
-        });
-        if (_cb_connection) _cb_connection(conn);
-
-        // 4. epoll 监听 req_notify_fd（Client 写完请求后 write 这个 fd）
-        int epfd = epoll_create1(0);
-        struct epoll_event ev;
-        ev.events = EPOLLIN;
-        ev.data.fd = _channel.req_notify_fd();
-        epoll_ctl(epfd, EPOLL_CTL_ADD, _channel.req_notify_fd(), &ev);
-
-        LCZ_INFO("[ShmServer] started (notify mode), fd=%d", _channel.req_notify_fd());
+        // 2. 创建 worker（先加入 vector，再启动线程）
         _running = true;
-
-        // 5. 事件循环：休眠等 Client 通知，收到后批量读请求
-        std::string body; lcz_rpc::MsgType type;
-        const int req_fd = _channel.req_notify_fd();
-        LCZ_INFO("[ShmServer] event loop started, req_fd=%d", req_fd);
-        while (_running) {
-            struct epoll_event events[1];
-            int n = epoll_wait(epfd, events, 1, 500);
-            if (n < 0) break;
-
-            if (n > 0) {
-                uint64_t val;
-                ssize_t rd = ::read(req_fd, &val, sizeof(val));
-                LCZ_DEBUG("[ShmServer] epoll wake: n=%d val=%lu bytes_read=%zd", n, val, rd);
+        for (int i = 0; i < _worker_count; ++i) {
+            auto w = std::make_unique<Worker>();
+            w->epfd = epoll_create1(0);
+            if (pipe(w->wake_pipe) < 0) {
+                LCZ_ERROR("[ShmServer] pipe failed for worker %d", i);
+                return;
             }
-
-            while (_channel.read_request(body, type)) {
-                LCZ_INFO("[ShmServer] recv request type=%d body_len=%zu", static_cast<int>(type), body.size());
-                auto msg = MessageFactory::create(type);
-                if (!msg) {
-                    LCZ_ERROR("[ShmServer] failed to create msg for type=%d", static_cast<int>(type));
-                    continue;
-                }
-                if (!msg->unserialize(body)) {
-                    LCZ_ERROR("[ShmServer] failed to unserialize body_len=%zu", body.size());
-                    continue;
-                }
-                msg->setMsgType(type);
-                if (_cb_message) _cb_message(conn, msg);
-                LCZ_DEBUG("[ShmServer] request processed");
-            }
+            // 读端非阻塞，防止 while(read)>0 死等
+            fcntl(w->wake_pipe[0], F_SETFL, O_NONBLOCK);
+            struct epoll_event ev;
+            ev.events = EPOLLIN;
+            ev.data.fd = w->wake_pipe[0];
+            epoll_ctl(w->epfd, EPOLL_CTL_ADD, w->wake_pipe[0], &ev);
+            _workers.push_back(std::move(w));
         }
-        close(epfd);
+        for (int i = 0; i < _worker_count; ++i) {
+            _workers[i]->thread = std::thread(&ShmServer::workerLoop, this, i);
+        }
+
+        LCZ_INFO("[ShmServer] listening on %s, workers=%d", _notify_path.c_str(), _worker_count);
+
+        // 3. 主线程 accept 循环
+        int next_id = 0;
+        int round_robin = 0;
+        while (_running) {
+            int conn_fd = accept(listen_fd, nullptr, nullptr);
+            if (conn_fd < 0) break;
+
+            if (next_id >= _max_clients) {
+                LCZ_ERROR("[ShmServer] max clients reached (%d)", _max_clients);
+                close(conn_fd); continue;
+            }
+
+            std::string shm_name = _shm_prefix + "_" + std::to_string(next_id++);
+            auto entry = std::make_shared<ClientEntry>();
+
+            if (!entry->channel.create(shm_name, _req_size, _resp_size)) {
+                LCZ_ERROR("[ShmServer] create %s failed", shm_name.c_str());
+                close(conn_fd); continue;
+            }
+
+            int req_fd = -1, resp_fd = -1;
+            if (!ShmChannel::handshake_server(conn_fd, req_fd, resp_fd, shm_name)) {
+                LCZ_ERROR("[ShmServer] handshake %s failed", shm_name.c_str());
+                entry->channel.destroy();
+                close(conn_fd); continue;
+            }
+            close(conn_fd);
+
+            entry->channel.set_req_notify_fd(req_fd);
+            entry->channel.set_resp_notify_fd(resp_fd);
+
+            auto conn = std::make_shared<ShmConnection>();
+            conn->setName("shm_server_" + std::to_string(next_id - 1));
+            conn->setSender([entry](const BaseMessage::ptr& msg) {
+                std::string body = msg->serialize();
+                entry->channel.write_response(body, msg->msgType());
+                entry->channel.notify_resp();
+            });
+            entry->conn = conn;
+
+            if (_cb_connection) _cb_connection(conn);
+
+            // 分配给 worker（round-robin）
+            int wid = round_robin++ % _worker_count;
+            auto& w = _workers[wid];
+            {
+                std::lock_guard<std::mutex> lk(w->mtx);
+                w->clients[req_fd] = entry;
+            }
+            ssize_t __attribute__((unused)) wr = ::write(w->wake_pipe[1], &req_fd, sizeof(req_fd));
+
+            LCZ_INFO("[ShmServer] client %d -> worker %d, shm=%s req_fd=%d",
+                     next_id - 1, wid, shm_name.c_str(), req_fd);
+        }
+
+        close(listen_fd);
+        unlink(_notify_path.c_str());
+
+        // 等待 worker 退出
+        for (auto& w : _workers) {
+            if (w->thread.joinable()) w->thread.join();
+        }
     }
 
     void stop() override { _running = false; }
-    ~ShmServer() { _running = false; _channel.destroy(); }
+    ~ShmServer() {
+        _running = false;
+        for (auto& w : _workers) {
+            close(w->wake_pipe[1]); // 唤醒阻塞在 epoll_wait 的 worker
+        }
+        for (auto& w : _workers) {
+            for (auto& [fd, entry] : w->clients) {
+                entry->channel.destroy();
+            }
+        }
+    }
 
 private:
-    ShmChannel         _channel;
-    ShmConnection::ptr _conn;
-    std::string        _shm_name, _notify_path;
-    size_t             _req_size, _resp_size;
-    std::atomic<bool>  _running{false};
+    struct ClientEntry {
+        ShmChannel         channel;
+        ShmConnection::ptr conn;
+    };
+
+    struct Worker {
+        int         epfd = -1;
+        int         wake_pipe[2] = {-1, -1};
+        std::thread thread;
+        std::mutex  mtx;
+        std::unordered_map<int, std::shared_ptr<ClientEntry>> clients;
+    };
+
+    void workerLoop(int worker_id) {
+        auto& w = _workers[worker_id];
+        const int MAX_EVENTS = 64;
+        struct epoll_event events[MAX_EVENTS];
+        std::string body; MsgType type;
+
+        LCZ_INFO("[ShmServer] worker %d started, epfd=%d", worker_id, w->epfd);
+
+        while (_running) {
+            int n = epoll_wait(w->epfd, events, MAX_EVENTS, 500);
+            if (n < 0) break;
+
+            for (int i = 0; i < n; ++i) {
+                int fd = events[i].data.fd;
+
+                if (fd == w->wake_pipe[0]) {
+                    int new_fd;
+                    while (::read(w->wake_pipe[0], &new_fd, sizeof(new_fd)) > 0) {
+                        struct epoll_event ev;
+                        ev.events = EPOLLIN;
+                        ev.data.fd = new_fd;
+                        epoll_ctl(w->epfd, EPOLL_CTL_ADD, new_fd, &ev);
+                        LCZ_DEBUG("[ShmServer] worker %d added fd=%d", worker_id, new_fd);
+                    }
+                } else {
+                    auto entry = [&]() -> std::shared_ptr<ClientEntry> {
+                        std::lock_guard<std::mutex> lk(w->mtx);
+                        auto it = w->clients.find(fd);
+                        return it != w->clients.end() ? it->second : nullptr;
+                    }();
+                    if (!entry) continue;
+
+                    uint64_t val;
+                    (void)::read(fd, &val, sizeof(val));
+
+                    while (entry->channel.read_request(body, type)) {
+                        auto msg = MessageFactory::create(type);
+                        if (msg && msg->unserialize(body)) {
+                            msg->setMsgType(type);
+                            if (_cb_message) _cb_message(entry->conn, msg);
+                        }
+                    }
+                }
+            }
+        }
+        close(w->epfd);
+        LCZ_INFO("[ShmServer] worker %d stopped", worker_id);
+    }
+
+    std::string       _notify_path;
+    std::string       _shm_prefix;
+    size_t            _req_size, _resp_size;
+    int               _max_clients;
+    int               _worker_count;
+    std::atomic<bool> _running{false};
+
+    std::vector<std::unique_ptr<Worker>> _workers;
 };
 
 } // namespace lcz_rpc

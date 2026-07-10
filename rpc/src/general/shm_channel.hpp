@@ -12,6 +12,7 @@
 #include <sys/eventfd.h> // eventfd, EFD_NONBLOCK, EFD_SEMAPHORE
 #include <sys/socket.h>  // socket, bind, listen, accept, connect, sendmsg, recvmsg
 #include <sys/un.h>      // sockaddr_un, AF_UNIX
+#include <arpa/inet.h>   // htonl, ntohl
 #include <cstring>       // memcpy, strcpy
 #include <atomic>        // std::atomic, memory_order_*
 #include <cassert>       // static_assert
@@ -75,22 +76,24 @@ namespace lcz_rpc
         bool write_response(const std::string &body, MsgType type, int max_retries = 3);
         bool read_response(std::string &body, MsgType &type);
 
-        // ====== 初始化握手（fd 传递） ======
+        // ====== 初始化握手（单客户端模式，保留向后兼容） ======
         bool setup_notify_server(const std::string &notify_path);
-        //   socket(AF_UNIX) → bind(listen_path) → listen → accept
-        //   → eventfd(EFD_SEMAPHORE) → sendmsg(SCM_RIGHTS) → recvmsg(SCM_RIGHTS)
-        //   → _req_notify_fd = 自己创建的, _resp_notify_fd = 收来的
-        //   → close(conn_fd)
-
         bool setup_notify_client(const std::string &notify_path);
-        //   socket(AF_UNIX) → connect
-        //   → recvmsg(SCM_RIGHTS) 拿到 req_fd
-        //   → eventfd(EFD_SEMAPHORE) → sendmsg(SCM_RIGHTS)
-        //   → _req_notify_fd = 收来的, _resp_notify_fd = 自己创建的
-        //   → close(conn_fd)
+
+        // ====== 初始化握手（多客户端模式） ======
+        // Server 端：在已 accept 的 conn_fd 上交换 eventfd + 发送 SHM 名字
+        static bool handshake_server(int conn_fd, int &req_fd, int &resp_fd,
+                                     const std::string &shm_name);
+        // Client 端：在已 connect 的 conn_fd 上交换 eventfd + 接收 SHM 名字
+        static bool handshake_client(int conn_fd, int &req_fd, int &resp_fd,
+                                     std::string &shm_name);
 
         int req_notify_fd() const { return _req_notify_fd; }   // Client→Server
         int resp_notify_fd() const { return _resp_notify_fd; } // Server→Client
+
+        // 外部设置 eventfd（多客户端 handshake 由外部传入）
+        void set_req_notify_fd(int fd)  { _req_notify_fd = fd; }
+        void set_resp_notify_fd(int fd) { _resp_notify_fd = fd; }
 
         // 写完数据后通知对端（Producer 调）
         void notify_req()  { uint64_t one=1; if(_req_notify_fd>=0) ::write(_req_notify_fd,&one,8); }

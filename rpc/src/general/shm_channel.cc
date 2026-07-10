@@ -539,6 +539,83 @@ namespace lcz_rpc
         return true;
     }
 
+    // ====== 多客户端握手（Server 端） ======
+    // 在已 accept 的 conn_fd 上：创建 req eventfd → 发给 client → 发 SHM 名字 → 收 resp eventfd
+    bool ShmChannel::handshake_server(int conn_fd, int &req_fd, int &resp_fd,
+                                      const std::string &shm_name)
+    {
+        LCZ_DEBUG("handshake_server: conn_fd=%d shm_name=%s", conn_fd, shm_name.c_str());
+
+        // 1. 创建 req eventfd（Server 收请求）
+        req_fd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
+        if (req_fd < 0) {
+            LCZ_ERROR("handshake_server: eventfd failed errno=%d", errno);
+            return false;
+        }
+
+        // 2. 发 req_fd 给 client
+        send_fd(conn_fd, req_fd);
+        LCZ_DEBUG("handshake_server: sent req_fd=%d", req_fd);
+
+        // 3. 发 SHM 名字（4B 长度 + 字符串）
+        uint32_t name_len = static_cast<uint32_t>(shm_name.size());
+        uint32_t name_len_net = htonl(name_len);
+        if (::write(conn_fd, &name_len_net, 4) != 4) {
+            LCZ_ERROR("handshake_server: write name_len failed");
+            close(req_fd); return false;
+        }
+        if (::write(conn_fd, shm_name.data(), name_len) != static_cast<ssize_t>(name_len)) {
+            LCZ_ERROR("handshake_server: write name failed");
+            close(req_fd); return false;
+        }
+        LCZ_DEBUG("handshake_server: sent shm_name=%s", shm_name.c_str());
+
+        // 4. 收 client 的 resp eventfd
+        resp_fd = recv_fd(conn_fd);
+        LCZ_DEBUG("handshake_server: received resp_fd=%d", resp_fd);
+
+        return true;
+    }
+
+    // ====== 多客户端握手（Client 端） ======
+    // 在已 connect 的 conn_fd 上：收 req eventfd → 收 SHM 名字 → 创建 resp eventfd → 发给 server
+    bool ShmChannel::handshake_client(int conn_fd, int &req_fd, int &resp_fd,
+                                      std::string &shm_name)
+    {
+        LCZ_DEBUG("handshake_client: conn_fd=%d", conn_fd);
+
+        // 1. 收 server 的 req eventfd
+        req_fd = recv_fd(conn_fd);
+        LCZ_DEBUG("handshake_client: received req_fd=%d", req_fd);
+
+        // 2. 收 SHM 名字
+        uint32_t name_len_net = 0;
+        if (::read(conn_fd, &name_len_net, 4) != 4) {
+            LCZ_ERROR("handshake_client: read name_len failed");
+            return false;
+        }
+        uint32_t name_len = ntohl(name_len_net);
+        shm_name.resize(name_len);
+        if (::read(conn_fd, &shm_name[0], name_len) != static_cast<ssize_t>(name_len)) {
+            LCZ_ERROR("handshake_client: read name failed");
+            return false;
+        }
+        LCZ_DEBUG("handshake_client: received shm_name=%s", shm_name.c_str());
+
+        // 3. 创建 resp eventfd（Client 收响应）
+        resp_fd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
+        if (resp_fd < 0) {
+            LCZ_ERROR("handshake_client: eventfd failed errno=%d", errno);
+            return false;
+        }
+
+        // 4. 发 resp_fd 给 server
+        send_fd(conn_fd, resp_fd);
+        LCZ_DEBUG("handshake_client: sent resp_fd=%d", resp_fd);
+
+        return true;
+    }
+
     // ====== 零拷贝写入原语（FlatBuffers/Protobuf 直接写入 ring buffer） ======
 
     char *ShmChannel::req_write_ptr(size_t &contig_avail)

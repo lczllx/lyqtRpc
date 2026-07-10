@@ -17,8 +17,8 @@ int main() {
 
     lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
 
-    lcz_rpc::ShmServerZc server("lcz_shm_bench_zc", "lcz_shm_bench_zc_notify",
-                                 64 * 1024 * 1024, 64 * 1024 * 1024);
+    lcz_rpc::ShmServerZc server("lcz_shm_bench_zc_notify", "lcz_shm_bench_zc",
+                                 1 * 1024 * 1024, 1 * 1024 * 1024, 32);
 
     server.setMessageCallback([](const lcz_rpc::BaseConnection::ptr& conn,
                                   lcz_rpc::BaseMessage::ptr& msg) {

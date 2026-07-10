@@ -1,9 +1,6 @@
 #pragma once
 // =============================================================================
-// shm_client_zc.hpp — 零拷贝 SHM Client（FlatBuffers，读端零拷贝）
-// =============================================================================
-// 写端: FlatBufferBuilder 构建 → write_request 写入 ring buffer
-// 读端: ShmZcReader 零拷贝映射 FlatBuffers 对象，无 deserialize
+// shm_client_zc.hpp — 零拷贝 SHM Client，多客户端
 // =============================================================================
 
 #include "../general/abstract.hpp"
@@ -14,6 +11,8 @@
 #include "../general/log_system/lcz_log.h"
 #include "rpc_message_generated.h"
 #include <sys/epoll.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <thread>
 #include <atomic>
@@ -22,53 +21,64 @@ namespace lcz_rpc {
 
 class ShmClientZc : public BaseClient {
 public:
-    ShmClientZc(const std::string& shm_name   = "lcz_shm_zc",
-                const std::string& notify_path = "lcz_shm_zc_notify")
-        : _shm_name(shm_name), _notify_path(notify_path) {}
+    ShmClientZc(const std::string& notify_path = "lcz_shm_zc_notify")
+        : _notify_path(notify_path) {}
 
     void connect() override {
-        if (!_channel.open(_shm_name)) {
-            LCZ_ERROR("[ShmClientZc] connect failed"); return;
+        int conn_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (conn_fd < 0) {
+            LCZ_ERROR("[ShmClientZc] socket failed errno=%d", errno); return;
         }
-        if (!_channel.setup_notify_client(_notify_path)) {
-            LCZ_ERROR("[ShmClientZc] notify setup failed");
-            _channel.destroy(); return;
+        struct sockaddr_un addr = {};
+        addr.sun_family = AF_UNIX;
+        strncpy(addr.sun_path, _notify_path.c_str(), sizeof(addr.sun_path) - 1);
+        if (::connect(conn_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+            LCZ_ERROR("[ShmClientZc] connect %s failed errno=%d", _notify_path.c_str(), errno);
+            close(conn_fd); return;
         }
 
+        int req_fd = -1, resp_fd = -1;
+        if (!ShmChannel::handshake_client(conn_fd, req_fd, resp_fd, _shm_name)) {
+            LCZ_ERROR("[ShmClientZc] handshake failed");
+            close(conn_fd); return;
+        }
+        close(conn_fd);
+
+        if (!_channel.open(_shm_name)) {
+            LCZ_ERROR("[ShmClientZc] open %s failed", _shm_name.c_str()); return;
+        }
+        _channel.set_req_notify_fd(req_fd);
+        _channel.set_resp_notify_fd(resp_fd);
+
         auto conn = std::make_shared<ShmConnection>();
-        conn->setName("shm_client_zc");
+        conn->setName("shm_client_zc_" + _shm_name);
         conn->setSender([this](const BaseMessage::ptr& msg) { send(msg); });
         _conn = conn;
         if (_cb_connection) _cb_connection(conn);
 
         _worker = std::thread([this]() { responseLoop(); });
-        LCZ_INFO("[ShmClientZc] connected");
+        LCZ_INFO("[ShmClientZc] connected, shm=%s", _shm_name.c_str());
     }
 
     bool send(const BaseMessage::ptr& msg) override {
         auto req = std::dynamic_pointer_cast<RpcRequest>(msg);
-        if (!req) { LCZ_ERROR("[ShmClientZc] not RpcRequest"); return false; }
+        if (!req) return false;
 
-        // FlatBufferBuilder 堆上构建（消息体小，避免 allocator 复杂度）
         flatbuffers::FlatBufferBuilder builder(256);
         auto id       = builder.CreateString(req->rid());
         auto method   = builder.CreateString(req->method());
         auto trace_id = builder.CreateString(req->trace_id());
-
         std::string params_json;
         JSON::serialize(req->params(), params_json);
         auto params_vec = builder.CreateVector(
             reinterpret_cast<const uint8_t*>(params_json.data()), params_json.size());
-
         auto root = fb::CreateRpcRequest(builder, id, method, trace_id, params_vec);
         builder.Finish(root);
 
-        // 写入 ring buffer（一次拷贝，FlatBuf 紧凑）
         std::string body(reinterpret_cast<const char*>(builder.GetBufferPointer()),
                          builder.GetSize());
         bool ok = _channel.write_request(body, MsgType::REQ_RPC_FLAT);
         if (ok) _channel.notify_req();
-        LCZ_DEBUG("[ShmClientZc] sent request size=%u rid=%s", builder.GetSize(), req->rid().c_str());
         return ok;
     }
 
@@ -98,12 +108,10 @@ private:
             struct epoll_event events[1];
             int n = epoll_wait(epfd, events, 1, 500);
             if (n < 0) break;
-            if (n > 0) { uint64_t val; ssize_t __attribute__((unused)) rd = ::read(resp_fd, &val, sizeof(val)); }
+            if (n > 0) { uint64_t val; (void)::read(resp_fd, &val, sizeof(val)); }
 
             while (_channel.read_response(body, type)) {
                 if (type != MsgType::RSP_RPC_FLAT) continue;
-
-                // 读端零拷贝：ShmZcReader 直接映射，不解析
                 ShmZcReader reader(body);
                 auto* fresp = reader.as<lcz_rpc::fb::RpcResponse>();
                 if (!fresp) continue;
@@ -112,14 +120,12 @@ private:
                 json_resp->setId(ShmZcReader::strval(fresp->id()));
                 json_resp->setRcode(static_cast<RespCode>(fresp->rcode()));
                 json_resp->setMsgType(MsgType::RSP_RPC);
-
                 if (fresp->result() && fresp->result()->size() > 0) {
                     std::string rs(reinterpret_cast<const char*>(fresp->result()->data()),
                                    fresp->result()->size());
                     Json::Value rv;
                     if (JSON::deserialize(rs, rv)) json_resp->setResult(rv);
                 }
-
                 if (_cb_message) {
                     BaseMessage::ptr base_msg = json_resp;
                     _cb_message(_conn, base_msg);
@@ -131,7 +137,8 @@ private:
 
     ShmChannel         _channel;
     ShmConnection::ptr _conn;
-    std::string        _shm_name, _notify_path;
+    std::string        _notify_path;
+    std::string        _shm_name;
     std::thread        _worker;
     std::atomic<bool>  _running{false};
 };

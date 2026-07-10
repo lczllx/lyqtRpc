@@ -15,7 +15,7 @@ int main() {
     signal(SIGINT,  [](int){ running = false; });
     signal(SIGTERM, [](int){ running = false; });
 
-    lcz_rpc::ShmServer server("lcz_shm", "lcz_shm_notify", 64*1024*1024, 64*1024*1024);
+    lcz_rpc::ShmServer server("lcz_shm_notify", "lcz_shm", 64*1024*1024, 64*1024*1024, 16);
 
     server.setMessageCallback([](const lcz_rpc::BaseConnection::ptr& conn,
                                   lcz_rpc::BaseMessage::ptr& msg) {
@@ -45,7 +45,7 @@ int main() {
         server.start();
     }).detach();
 
-    std::cout << "[server] 共享内存已创建，等待请求... (Ctrl+C 退出)" << std::endl;
+    std::cout << "[server] 共享内存服务已启动，支持多客户端，等待请求... (Ctrl+C 退出)" << std::endl;
     while (running) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
     server.stop();
     std::cout << "[server] 退出" << std::endl;

@@ -14,8 +14,8 @@ int main() {
     signal(SIGINT,  [](int){ running = false; });
     signal(SIGTERM, [](int){ running = false; });
 
-    lcz_rpc::ShmServerZc server("lcz_shm_zc", "lcz_shm_zc_notify",
-                                 64 * 1024 * 1024, 64 * 1024 * 1024);
+    lcz_rpc::ShmServerZc server("lcz_shm_zc_notify", "lcz_shm_zc",
+                                 64 * 1024 * 1024, 64 * 1024 * 1024, 16);
 
     server.setMessageCallback([](const lcz_rpc::BaseConnection::ptr& conn,
                                   lcz_rpc::BaseMessage::ptr& msg) {

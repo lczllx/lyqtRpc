@@ -10,7 +10,7 @@
 
 int main() {
     lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
-    lcz_rpc::ShmClientZc client("lcz_shm_zc", "lcz_shm_zc_notify");
+    lcz_rpc::ShmClientZc client("lcz_shm_zc_notify");
 
     std::mutex mtx;
     std::condition_variable cv;

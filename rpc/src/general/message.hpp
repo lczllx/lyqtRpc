@@ -560,11 +560,20 @@ namespace lcz_rpc
         using ptr = std::shared_ptr<ProtoRpcRequest>;
         virtual std::string serialize() override
         {
+            if (!rid().empty()) _envelope.set_id(rid());
             if (!_envelope.SerializeToString(&_serialized)) {
                 LCZ_ERROR("ProtoRpcRequest::serialize failed");
                 return "";
             }
             return _serialized;
+        }
+        size_t byteSize() {
+            if (!rid().empty()) _envelope.set_id(rid());
+            return _envelope.ByteSizeLong();
+        }
+        bool serializeToArray(void* buf, size_t size) {
+            if (!rid().empty()) _envelope.set_id(rid());
+            return _envelope.SerializeToArray(buf, size);
         }
         virtual bool unserialize(const std::string& msg) override
         {
@@ -572,6 +581,7 @@ namespace lcz_rpc
                 LCZ_ERROR("ProtoRpcRequest::unserialize failed");
                 return false;
             }
+            if (!_envelope.id().empty()) setId(_envelope.id());
             return true;
         }
         virtual bool check() override
@@ -591,8 +601,8 @@ namespace lcz_rpc
         std::string span_id() const { return _envelope.span_id(); }
         void setSpanId(const std::string& s) { _envelope.set_span_id(s); }
     private:
-        lcz_rpc::proto::RpcRequestEnvelope _envelope; // protobuf 请求包体，包含 method + body + trace_id
-        std::string _serialized;                       // 预序列化缓存，避免重复序列化
+        mutable lcz_rpc::proto::RpcRequestEnvelope _envelope;
+        mutable std::string _serialized;
     };
 
     // 纯 Proto RPC 响应：线缆 body = RpcResponseEnvelope（rcode + bytes body），路径二
@@ -602,6 +612,7 @@ namespace lcz_rpc
         using ptr = std::shared_ptr<ProtoRpcResponse>;
         virtual std::string serialize() override
         {
+            if (!rid().empty()) _envelope.set_id(rid());
             if (!_envelope.SerializeToString(&_serialized)) {
                 LCZ_ERROR("ProtoRpcResponse::serialize failed");
                 return "";
@@ -614,9 +625,18 @@ namespace lcz_rpc
                 LCZ_ERROR("ProtoRpcResponse::unserialize failed");
                 return false;
             }
+            if (!_envelope.id().empty()) setId(_envelope.id());
             return true;
         }
         virtual bool check() override { return true; }
+        size_t byteSize() {
+            if (!rid().empty()) _envelope.set_id(rid());
+            return _envelope.ByteSizeLong();
+        }
+        bool serializeToArray(void* buf, size_t size) {
+            if (!rid().empty()) _envelope.set_id(rid());
+            return _envelope.SerializeToArray(buf, size);
+        }
         RespCode rcode() const { return static_cast<RespCode>(_envelope.rcode()); }
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
         std::string body() const { return _envelope.body(); }
@@ -625,8 +645,8 @@ namespace lcz_rpc
         int64_t retryAfterMs() const { return _retry_after_ms; }
         void setRetryAfterMs(int64_t ms) { _retry_after_ms = ms; }
     private:
-        lcz_rpc::proto::RpcResponseEnvelope _envelope; // protobuf 响应包体，包含 rcode + body
-        std::string _serialized;                        // 预序列化缓存，避免重复序列化
+        mutable lcz_rpc::proto::RpcResponseEnvelope _envelope;
+        mutable std::string _serialized;
         int64_t _retry_after_ms = 0;                    // 服务端过载时建议退避毫秒数，0=未设置（非序列化）
     };
 

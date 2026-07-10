@@ -20,8 +20,8 @@ int main() {
     // 关闭框架日志，避免干扰 benchmark 输出
     lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
 
-    lcz_rpc::ShmServer server("lcz_shm_bench", "lcz_shm_bench_notify",
-                               64 * 1024 * 1024, 64 * 1024 * 1024);
+    lcz_rpc::ShmServer server("lcz_shm_bench_notify", "lcz_shm_bench",
+                               1 * 1024 * 1024, 1 * 1024 * 1024, 32);
 
     server.setMessageCallback([](const lcz_rpc::BaseConnection::ptr& conn,
                                   lcz_rpc::BaseMessage::ptr& msg) {
