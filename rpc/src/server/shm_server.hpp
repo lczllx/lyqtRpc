@@ -47,7 +47,9 @@ public:
         conn->setName("shm_server");
         conn->setSender([this](const BaseMessage::ptr& msg) {
             std::string body = msg->serialize();
-            _channel.write_response(body, msg->msgType());
+            LCZ_DEBUG("[ShmServer] conn->send: type=%d body_len=%zu", static_cast<int>(msg->msgType()), body.size());
+            bool ok = _channel.write_response(body, msg->msgType());
+            LCZ_DEBUG("[ShmServer] write_response ok=%d, notifying client via resp_fd=%d", ok, _channel.resp_notify_fd());
             _channel.notify_resp();
         });
         if (_cb_connection) _cb_connection(conn);
@@ -64,17 +66,33 @@ public:
 
         // 5. 事件循环：休眠等 Client 通知，收到后批量读请求
         std::string body; lcz_rpc::MsgType type;
+        const int req_fd = _channel.req_notify_fd();
+        LCZ_INFO("[ShmServer] event loop started, req_fd=%d", req_fd);
         while (_running) {
             struct epoll_event events[1];
             int n = epoll_wait(epfd, events, 1, 500);
             if (n < 0) break;
 
+            if (n > 0) {
+                uint64_t val;
+                ssize_t rd = ::read(req_fd, &val, sizeof(val));
+                LCZ_DEBUG("[ShmServer] epoll wake: n=%d val=%lu bytes_read=%zd", n, val, rd);
+            }
+
             while (_channel.read_request(body, type)) {
+                LCZ_INFO("[ShmServer] recv request type=%d body_len=%zu", static_cast<int>(type), body.size());
                 auto msg = MessageFactory::create(type);
-                if (msg && msg->unserialize(body)) {
-                    msg->setMsgType(type);
-                    if (_cb_message) _cb_message(conn, msg);
+                if (!msg) {
+                    LCZ_ERROR("[ShmServer] failed to create msg for type=%d", static_cast<int>(type));
+                    continue;
                 }
+                if (!msg->unserialize(body)) {
+                    LCZ_ERROR("[ShmServer] failed to unserialize body_len=%zu", body.size());
+                    continue;
+                }
+                msg->setMsgType(type);
+                if (_cb_message) _cb_message(conn, msg);
+                LCZ_DEBUG("[ShmServer] request processed");
             }
         }
         close(epfd);

@@ -76,17 +76,32 @@ private:
 
         _running = true;
         std::string body; lcz_rpc::MsgType type;
+        const int resp_fd = _channel.resp_notify_fd();
+        LCZ_INFO("[ShmClient] responseLoop started, resp_fd=%d", resp_fd);
         while (_running) {
             struct epoll_event events[1];
             int n = epoll_wait(epfd, events, 1, 500);
             if (n < 0) break;
 
+            if (n > 0) {
+                uint64_t val;
+                ssize_t rd = ::read(resp_fd, &val, sizeof(val));
+                LCZ_DEBUG("[ShmClient] epoll wake: n=%d val=%lu bytes_read=%zd", n, val, rd);
+            }
+
             while (_channel.read_response(body, type)) {
+                LCZ_INFO("[ShmClient] recv response type=%d body_len=%zu", static_cast<int>(type), body.size());
                 auto msg = MessageFactory::create(type);
-                if (msg && msg->unserialize(body)) {
-                    msg->setMsgType(type);
-                    if (_cb_message) _cb_message(_conn, msg);
+                if (!msg) {
+                    LCZ_ERROR("[ShmClient] failed to create msg for type=%d", static_cast<int>(type));
+                    continue;
                 }
+                if (!msg->unserialize(body)) {
+                    LCZ_ERROR("[ShmClient] failed to unserialize body_len=%zu", body.size());
+                    continue;
+                }
+                msg->setMsgType(type);
+                if (_cb_message) _cb_message(_conn, msg);
             }
         }
         close(epfd);

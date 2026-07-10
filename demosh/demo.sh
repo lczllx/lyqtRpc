@@ -25,7 +25,6 @@ fi
 
 
 BIN="$ROOT_DIR/rpc/build/bin"
-BIN3="$ROOT_DIR/rpc/build/example/test/test3"
 LOG_DIR="/tmp/rpc-demo-logs"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -296,15 +295,15 @@ demo_topic() {
     echo ""
 
     step 1 "启动 Topic 服务器"
-    "$BIN3/test3_topic_server" > "$LOG_DIR/top_srv.log" 2>&1 &
+    "$BIN/test3_topic_server" > "$LOG_DIR/top_srv.log" 2>&1 &
     SRV_PID=$!
     sleep 1
     info "Topic 服务端启动 (port 7070)"
 
     step 2 "启动订阅者: vip (priority=5) + normal (priority=1)"
-    "$BIN3/test3_subscribe_client" vip > "$LOG_DIR/top_vip.log" 2>&1 &
+    "$BIN/test3_subscribe_client" vip > "$LOG_DIR/top_vip.log" 2>&1 &
     VIP_PID=$!
-    "$BIN3/test3_subscribe_client" normal > "$LOG_DIR/top_normal.log" 2>&1 &
+    "$BIN/test3_subscribe_client" normal > "$LOG_DIR/top_normal.log" 2>&1 &
     NORMAL_PID=$!
     sleep 1
     info "vip 订阅者 (tags=[vip], priority=5)"
@@ -314,7 +313,7 @@ demo_topic() {
     echo ""
     for mode in broadcast priority fanout hash redundant; do
         info "策略: $mode"
-        "$BIN3/test3_publish_client" "$mode" > "$LOG_DIR/top_pub_${mode}.log" 2>&1
+        "$BIN/test3_publish_client" "$mode" > "$LOG_DIR/top_pub_${mode}.log" 2>&1
         sleep 0.3
     done
 

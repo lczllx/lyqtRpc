@@ -5,6 +5,9 @@ namespace lcz_rpc
     // ====== Server 端 ======
     bool ShmChannel::create(const std::string &name, size_t req_buf_size, size_t resp_buf_size)
     {
+        LCZ_DEBUG("ShmChannel::create name=%s req_size=%zu resp_size=%zu",
+                  name.c_str(), req_buf_size, resp_buf_size);
+
         // 1. shm_open：在 /dev/shm/ 下创建共享内存对象（tmpfs，纯内存不落盘）
         //    O_CREAT | O_EXCL：新建，已存在则失败，防止两个 Server 进程冲突
         int fd = shm_open(
@@ -17,10 +20,13 @@ namespace lcz_rpc
             LCZ_ERROR("shm_open %s failed, errno=%d", name.c_str(), errno);
             return false;
         }
+        LCZ_DEBUG("shm_open %s success fd=%d", name.c_str(), fd);
 
         // 2. ftruncate：设置大小。必须先调，否则 mmap 区域访问越界 → SIGBUS
         //    布局：控制区(4KB) + 请求数据区 + 响应数据区
         _total_size = SHM_CTRL_SIZE + req_buf_size + resp_buf_size;
+        LCZ_DEBUG("ftruncate %s total_size=%zu (ctrl=%zu + req=%zu + resp=%zu)",
+                  name.c_str(), _total_size, SHM_CTRL_SIZE, req_buf_size, resp_buf_size);
         int ret = ftruncate(fd, _total_size);
         if (ret < 0)
         {
@@ -29,6 +35,7 @@ namespace lcz_rpc
             shm_unlink(name.c_str());
             return false;
         }
+        LCZ_DEBUG("ftruncate %s success", name.c_str());
 
         // 3. mmap：把内核分配的物理内存映射到当前进程虚拟地址空间
         //    MAP_SHARED：Server 写入对 Client 立即可见（映射同一物理页）
@@ -40,16 +47,21 @@ namespace lcz_rpc
             shm_unlink(name.c_str());
             return false;
         }
+        LCZ_DEBUG("mmap %s success addr=%p", name.c_str(), _addr);
 
         // 4. placement new：在 mmap 原始内存上构造 ShmControl
         //    std::atomic 有内部状态，不能 memcpy，必须原地构造
         _ctrl = new (_addr) ShmControl();
         _ctrl->req_channel.data_size = req_buf_size;
         _ctrl->resp_channel.data_size = resp_buf_size;
+        LCZ_DEBUG("placement new ShmControl at addr=%p, req_data_size=%zu resp_data_size=%zu",
+                  static_cast<void*>(_ctrl), req_buf_size, resp_buf_size);
 
         // 5. 计算两个数据区的起始指针
         _req_data = (char *)_addr + SHM_CTRL_SIZE; // 控制区后面
         _resp_data = _req_data + req_buf_size;     // 请求区后面
+        LCZ_DEBUG("data pointers: req=%p resp=%p",
+                  static_cast<void*>(_req_data), static_cast<void*>(_resp_data));
 
         _shm_fd = fd;
         _is_creator = true;
@@ -57,12 +69,15 @@ namespace lcz_rpc
 
         // 6. 宣布就绪。release 保证以上所有初始化在 store 之前对 Client 可见
         _ctrl->ready.store(true, std::memory_order_release);
+        LCZ_DEBUG("ShmChannel::create %s done, ready=true (release)", name.c_str());
         return true;
     }
 
     // ====== Client 端 ======
     bool ShmChannel::open(const std::string &name)
     {
+        LCZ_DEBUG("ShmChannel::open name=%s", name.c_str());
+
         if (_addr)
         {
             LCZ_ERROR("shm_open %s failed, already open", name.c_str());
@@ -76,6 +91,7 @@ namespace lcz_rpc
                       name.c_str(), errno);
             return false;
         }
+        LCZ_DEBUG("shm_open %s success fd=%d", name.c_str(), fd);
 
         // 2. fstat：拿 Server 用 ftruncate 设置的总大小
         struct stat st;
@@ -86,6 +102,7 @@ namespace lcz_rpc
             return false;
         }
         _total_size = static_cast<size_t>(st.st_size);
+        LCZ_DEBUG("fstat %s total_size=%zu", name.c_str(), _total_size);
 
         // 3. mmap：映射到本进程虚拟地址空间。MAP_SHARED → 和 Server 同一物理内存
         _addr = mmap(nullptr, _total_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -95,25 +112,32 @@ namespace lcz_rpc
             close(fd);
             return false;
         }
+        LCZ_DEBUG("mmap %s success addr=%p", name.c_str(), _addr);
 
         // 4. 取控制区指针 — Server 已用 placement new 原地构造好，直接转
         _ctrl = static_cast<ShmControl *>(_addr);
 
         // 5. 自旋等 Server 就绪。acquire 保证看到 data_size 等初始化值
+        LCZ_DEBUG("waiting for server ready (spin acquire)...");
         while (!_ctrl->ready.load(std::memory_order_acquire))
         {
             __asm__("pause");
             // Server 在 us 级就绪，不忙太久
         }
+        LCZ_DEBUG("server ready detected");
 
         // 6. 从控制区读 data_size，计算两个数据区的起始指针
         size_t req_size = _ctrl->req_channel.data_size;
         size_t resp_size = _ctrl->resp_channel.data_size;
         _req_data = static_cast<char *>(_addr) + SHM_CTRL_SIZE;
         _resp_data = _req_data + req_size;
+        LCZ_DEBUG("data pointers: req=%p req_size=%zu resp=%p resp_size=%zu",
+                  static_cast<void*>(_req_data), req_size,
+                  static_cast<void*>(_resp_data), resp_size);
 
         _shm_fd = fd;
         _name = name;
+        LCZ_DEBUG("ShmChannel::open %s done fd=%d", name.c_str(), fd);
         return true;
     }
 
@@ -132,19 +156,29 @@ namespace lcz_rpc
         uint32_t frame_len = 8 + body_len;
         uint64_t ds = ch.data_size; // ring buffer 数据区总大小
 
+        LCZ_DEBUG("write_to: frame_len=%u body_len=%u max_retries=%d data_size=%lu",
+                  frame_len, body_len, max_retries, ds);
+
         for (int retry = 0; retry < max_retries; ++retry)
         {
+            if (retry > 0)
+                LCZ_DEBUG("write_to retry %d/%d", retry, max_retries);
+
             // 1. 读生产者位置（自己写的，relaxed 够用）
-            // 防一个场景：进程崩溃后重启，Producer 需要从共享内存里读出上次写到哪了。
-            // 本地变量丢了，但 write_idx 还在 mmap 里。
             uint64_t w = ch.write_idx.load(std::memory_order_relaxed);
             //    读消费者位置（对端写的，acquire 才能看到对方的消费进度）
             uint64_t r = ch.read_idx.load(std::memory_order_acquire);
 
+            LCZ_DEBUG("write_to idx: w=%lu r=%lu used=%lu", w, r, w - r);
+
             // 2. 检查空间：总大小 - 已用 = data_size - (w - r)
             //    uint64 回绕自动正确：如 w=5 r=UINT64_MAX-10 → 5-(-11)=16 ✓
             if (ds - (w - r) < frame_len)
+            {
+                LCZ_DEBUG("write_to ring buffer full (avail=%lu < need=%u), retrying...",
+                          ds - (w - r), frame_len);
                 continue; // 不够，等 consumer 消费后重试
+            }
 
             // 3. 计算写入位置
             uint64_t offset = w % ds;      // 环形偏移
@@ -153,6 +187,8 @@ namespace lcz_rpc
             // 4. 尾部连续空间不够容下整帧 → 写跳过帧，从 buffer 头重新开始
             if (contig < frame_len)
             {
+                LCZ_DEBUG("write_to wrap: offset=%lu contig=%lu < frame_len=%u, writing skip frame",
+                          offset, contig, frame_len);
                 // 写一个 frame_len=0 的标记，consumer 读到 0 知道这是填充
                 if (contig >= 4)
                 {
@@ -172,10 +208,15 @@ namespace lcz_rpc
                 // 跳过后重新检查
                 contig = r % ds;
                 if (ds - (w - r) < frame_len)
+                {
+                    LCZ_DEBUG("write_to after wrap still full, retrying");
                     continue; // 跳过帧浪费了尾部空间，总量不够了，等 consumer 消费
+                }
             }
 
             // 5. 写 frame_len（4B，不含自身）
+            LCZ_DEBUG("write_to writing at offset=%lu: frame_len=%u type=%d body_len=%u",
+                      offset, frame_len, static_cast<int>(type), body_len);
             memcpy(data_base + offset, &frame_len, 4);
             //    写 msg_type（4B，int32 格式）
             int32_t mt = static_cast<int32_t>(type);
@@ -186,8 +227,10 @@ namespace lcz_rpc
             // 6. 公布新位置
             //    release：保证上面三个 memcpy 全部完成，对端 acquire 才能看到
             ch.write_idx.store(w + frame_len, std::memory_order_release);
+            LCZ_DEBUG("write_to done, new write_idx=%lu", w + frame_len);
             return true;
         }
+        LCZ_DEBUG("write_to failed after %d retries", max_retries);
         return false; // 重试耗完，ring buffer 一直满
     }
 
@@ -201,17 +244,21 @@ namespace lcz_rpc
         if (w == r)
             return false; // 空了，没有新数据
 
+        LCZ_DEBUG("read_from: r=%lu w=%lu avail=%lu", r, w, w - r);
+
         uint64_t ds = ch.data_size;
         uint64_t offset = r % ds; // 环形偏移
 
         // 2. 读帧头 4B → frame_len
         uint32_t frame_len;
         memcpy(&frame_len, data_base + offset, 4);
+        LCZ_DEBUG("read_from offset=%lu frame_len=%u", offset, frame_len);
 
         // 3. frame_len == 0 → 生产者写的跳过帧
         //    直接跳到 buffer 头，重试一次
         if (frame_len == 0)
         {
+            LCZ_DEBUG("read_from hit skip frame, jumping from offset %lu to 0", offset);
             // ds - offset = 从当前位置到尾部的字节数，全部跳过
             ch.read_idx.store(r + (ds - offset), std::memory_order_release);
             return read_from(ch, data_base, body, type);
@@ -225,6 +272,9 @@ namespace lcz_rpc
         // 5. 读 body（frame_len - 8 字节，减去帧头）
         body.assign(data_base + offset + 8, frame_len - 8);
 
+        LCZ_DEBUG("read_from done: type=%d body_len=%zu new_read_idx=%lu",
+                  static_cast<int>(type), body.size(), r + frame_len);
+
         // 6. 确认消费完成，挪 read_idx
         ch.read_idx.store(r + frame_len, std::memory_order_release);
         return true;
@@ -234,54 +284,76 @@ namespace lcz_rpc
     // 委托到 write_to / read_from，走 req_channel
     bool ShmChannel::write_request(const std::string &body, MsgType type, int max_retries)
     {
-        return write_to(_ctrl->req_channel, _req_data, body, type, max_retries);
+        LCZ_DEBUG("write_request: body_len=%zu type=%d max_retries=%d",
+                  body.size(), static_cast<int>(type), max_retries);
+        bool ok = write_to(_ctrl->req_channel, _req_data, body, type, max_retries);
+        LCZ_DEBUG("write_request result=%d", ok);
+        return ok;
     }
     bool ShmChannel::read_request(std::string &body, MsgType &type)
     {
-        return read_from(_ctrl->req_channel, _req_data, body, type);
+        bool ok = read_from(_ctrl->req_channel, _req_data, body, type);
+        if (ok)
+            LCZ_DEBUG("read_request: type=%d body_len=%zu", static_cast<int>(type), body.size());
+        return ok;
     }
 
     // ====== 响应方向（Server → Client） ======
     // 委托到 write_to / read_from，走 resp_channel
     bool ShmChannel::write_response(const std::string &body, MsgType type, int max_retries)
     {
-        return write_to(_ctrl->resp_channel, _resp_data, body, type, max_retries);
+        LCZ_DEBUG("write_response: body_len=%zu type=%d max_retries=%d",
+                  body.size(), static_cast<int>(type), max_retries);
+        bool ok = write_to(_ctrl->resp_channel, _resp_data, body, type, max_retries);
+        LCZ_DEBUG("write_response result=%d", ok);
+        return ok;
     }
     bool ShmChannel::read_response(std::string &body, MsgType &type)
     {
-        return read_from(_ctrl->resp_channel, _resp_data, body, type);
+        bool ok = read_from(_ctrl->resp_channel, _resp_data, body, type);
+        if (ok)
+            LCZ_DEBUG("read_response: type=%d body_len=%zu", static_cast<int>(type), body.size());
+        return ok;
     }
 
     // 析构自动清理，防止测试或异常路径泄漏 mmap / fd
     ShmChannel::~ShmChannel()
     {
+        LCZ_DEBUG("~ShmChannel name=%s is_creator=%d", _name.c_str(), _is_creator);
         destroy();
     }
 
     // ====== 生命周期 ======
     void ShmChannel::destroy()
     {
+        LCZ_DEBUG("ShmChannel::destroy name=%s addr=%p shm_fd=%d is_creator=%d",
+                  _name.c_str(), _addr, _shm_fd, _is_creator);
+
         // 1. munmap：解除虚拟地址空间映射
         if (_addr)
         {
+            LCZ_DEBUG("munmap addr=%p total_size=%zu", _addr, _total_size);
             munmap(_addr, _total_size);
             _addr = nullptr;
         }
         // 2. close：关闭共享内存文件描述符
         if (_shm_fd >= 0)
         {
+            LCZ_DEBUG("close shm_fd=%d", _shm_fd);
             close(_shm_fd);
             _shm_fd = -1;
         }
         // 3. shm_unlink：从 /dev/shm 删除文件（仅创建者）
         if (_is_creator && !_name.empty())
         {
+            LCZ_DEBUG("shm_unlink %s", _name.c_str());
             shm_unlink(_name.c_str());
         }
         // 4. 清空指针，防止悬挂引用
         _ctrl = nullptr;
         _req_data = nullptr;
         _resp_data = nullptr;
+        LCZ_DEBUG("ShmChannel::destroy done");
     }
     // ====== SCM_RIGHTS 工具函数：跨进程传递文件描述符 ======
     // 内核做的事：在目标进程的 fd 表中创建新条目，指向同一个 struct file
@@ -290,6 +362,8 @@ namespace lcz_rpc
     // 通过 Unix 域 socket 连接发送一个 fd 给对端进程
     static void send_fd(int conn_fd, int fd_to_send)
     {
+        LCZ_DEBUG("send_fd: conn_fd=%d fd_to_send=%d", conn_fd, fd_to_send);
+
         char buf[1] = {'x'};                      // 至少 1 字节数据，否则 SCM_RIGHTS 不生效
         struct iovec io = {buf, sizeof(buf)};
 
@@ -312,13 +386,16 @@ namespace lcz_rpc
         cmsg->cmsg_len   = CMSG_LEN(sizeof(int));
         memcpy(CMSG_DATA(cmsg), &fd_to_send, sizeof(int));
 
-        sendmsg(conn_fd, &msg, 0);
+        ssize_t sent = sendmsg(conn_fd, &msg, 0);
+        LCZ_DEBUG("send_fd: sendmsg returned %zd", sent);
         // 发送方可以关闭 fd——对端已在内核拿到新 fd，指向同一对象
     }
 
     // 从 Unix 域 socket 连接接收对端发来的 fd
     static int recv_fd(int conn_fd)
     {
+        LCZ_DEBUG("recv_fd: conn_fd=%d", conn_fd);
+
         char buf[1];
         struct iovec io = {buf, sizeof(buf)};
 
@@ -334,9 +411,11 @@ namespace lcz_rpc
         msg.msg_control    = &cbuf;
         msg.msg_controllen = sizeof(cbuf);
 
-        recvmsg(conn_fd, &msg, 0);
+        ssize_t recvd = recvmsg(conn_fd, &msg, 0);
+        LCZ_DEBUG("recv_fd: recvmsg returned %zd", recvd);
         int fd;
         memcpy(&fd, CMSG_DATA(CMSG_FIRSTHDR(&msg)), sizeof(int));
+        LCZ_DEBUG("recv_fd: received fd=%d", fd);
         return fd;
     }
 
@@ -346,28 +425,35 @@ namespace lcz_rpc
     // 握手完成后 conn_fd 关闭，后续通知直接读写 eventfd。
     bool ShmChannel::setup_notify_server(const std::string &notify_path)
     {
+        LCZ_DEBUG("setup_notify_server: notify_path=%s", notify_path.c_str());
+
         // 1. 创建 Unix 域 socket，绑定到一个文件系统路径
         int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (listen_fd < 0) {
             LCZ_ERROR("setup_notify_server: socket failed errno=%d", errno);
             return false;
         }
+        LCZ_DEBUG("setup_notify_server: socket listen_fd=%d", listen_fd);
 
         struct sockaddr_un addr = {};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, notify_path.c_str(), sizeof(addr.sun_path) - 1);
         unlink(notify_path.c_str());               // 清理上次残留的 socket 文件
+        LCZ_DEBUG("setup_notify_server: unlink stale socket, binding...");
         if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             LCZ_ERROR("setup_notify_server: bind %s failed errno=%d", notify_path.c_str(), errno);
             close(listen_fd);
             return false;
         }
+        LCZ_DEBUG("setup_notify_server: bind %s success", notify_path.c_str());
+
         if (listen(listen_fd, 1) < 0) {
             LCZ_ERROR("setup_notify_server: listen failed errno=%d", errno);
             close(listen_fd);
             unlink(notify_path.c_str());
             return false;
         }
+        LCZ_DEBUG("setup_notify_server: listening, waiting for client accept...");
 
         // 2. 阻塞等 Client 连上来
         int conn_fd = accept(listen_fd, nullptr, nullptr);
@@ -377,6 +463,7 @@ namespace lcz_rpc
             unlink(notify_path.c_str());
             return false;
         }
+        LCZ_DEBUG("setup_notify_server: accept conn_fd=%d", conn_fd);
 
         // 3. 创建自己的 eventfd（Client 写完请求后 write 这个 fd 通知 Server）
         _req_notify_fd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
@@ -385,14 +472,18 @@ namespace lcz_rpc
             close(conn_fd); close(listen_fd);
             return false;
         }
+        LCZ_DEBUG("setup_notify_server: eventfd req_fd=%d", _req_notify_fd);
 
         // 4. 把 req_notify_fd 发给 Client，收 Client 的 resp_notify_fd
+        LCZ_DEBUG("setup_notify_server: sending req_fd=%d to client", _req_notify_fd);
         send_fd(conn_fd, _req_notify_fd);
         _resp_notify_fd = recv_fd(conn_fd);
+        LCZ_DEBUG("setup_notify_server: received resp_fd=%d from client", _resp_notify_fd);
 
         // 5. 握手完成，关闭 Unix socket（eventfd 已独立可用）
         close(conn_fd);
         close(listen_fd);
+        LCZ_DEBUG("setup_notify_server: closing socket conn_fd=%d listen_fd=%d", conn_fd, listen_fd);
 
         LCZ_INFO("setup_notify_server: req_fd=%d resp_fd=%d", _req_notify_fd, _resp_notify_fd);
         return true;
@@ -401,25 +492,31 @@ namespace lcz_rpc
     // ====== Client 端：connect → 交换 eventfd ======
     bool ShmChannel::setup_notify_client(const std::string &notify_path)
     {
+        LCZ_DEBUG("setup_notify_client: notify_path=%s", notify_path.c_str());
+
         // 1. 创建 Unix 域 socket 并连接 Server
         int conn_fd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (conn_fd < 0) {
             LCZ_ERROR("setup_notify_client: socket failed errno=%d", errno);
             return false;
         }
+        LCZ_DEBUG("setup_notify_client: socket conn_fd=%d", conn_fd);
 
         struct sockaddr_un addr = {};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, notify_path.c_str(), sizeof(addr.sun_path) - 1);
+        LCZ_DEBUG("setup_notify_client: connecting to %s ...", notify_path.c_str());
         if (connect(conn_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
             LCZ_ERROR("setup_notify_client: connect %s failed errno=%d (server 是否已启动?)",
                       notify_path.c_str(), errno);
             close(conn_fd);
             return false;
         }
+        LCZ_DEBUG("setup_notify_client: connect success");
 
         // 2. 收 Server 的 req_notify_fd
         _req_notify_fd = recv_fd(conn_fd);
+        LCZ_DEBUG("setup_notify_client: received req_fd=%d from server", _req_notify_fd);
 
         // 3. 创建自己的 eventfd（Server 写完响应后 write 这个 fd 通知 Client）
         _resp_notify_fd = eventfd(0, EFD_NONBLOCK | EFD_SEMAPHORE);
@@ -428,15 +525,114 @@ namespace lcz_rpc
             close(conn_fd);
             return false;
         }
+        LCZ_DEBUG("setup_notify_client: eventfd resp_fd=%d", _resp_notify_fd);
 
         // 4. 把自己的 resp_notify_fd 发给 Server
+        LCZ_DEBUG("setup_notify_client: sending resp_fd=%d to server", _resp_notify_fd);
         send_fd(conn_fd, _resp_notify_fd);
 
         // 5. 握手完成
         close(conn_fd);
+        LCZ_DEBUG("setup_notify_client: closing socket conn_fd=%d", conn_fd);
 
         LCZ_INFO("setup_notify_client: req_fd=%d resp_fd=%d", _req_notify_fd, _resp_notify_fd);
         return true;
+    }
+
+    // ====== 零拷贝写入原语（FlatBuffers/Protobuf 直接写入 ring buffer） ======
+
+    char *ShmChannel::req_write_ptr(size_t &contig_avail)
+    {
+        uint64_t w = _ctrl->req_channel.write_idx.load(std::memory_order_relaxed);
+        uint64_t r = _ctrl->req_channel.read_idx.load(std::memory_order_acquire);
+        uint64_t ds = _ctrl->req_channel.data_size;
+        uint64_t used  = w - r;
+        uint64_t avail = ds - used;
+        if (avail < 8)
+        {
+            LCZ_DEBUG("req_write_ptr: ring buffer full (avail=%lu)", avail);
+            contig_avail = 0;
+            return nullptr;
+        }
+        uint64_t offset = w % ds;
+        uint64_t contig = ds - offset;
+        uint64_t body_contig = std::min(avail, contig);
+        // 至少留 8 字节给 frame header（4B frame_len + 4B msg_type）
+        if (body_contig <= 8)
+        {
+            LCZ_DEBUG("req_write_ptr: not enough contiguous space for header+body");
+            contig_avail = 0;
+            return nullptr;
+        }
+        contig_avail = body_contig - 8;
+        LCZ_DEBUG("req_write_ptr: w=%lu r=%lu offset=%lu contig_avail=%zu", w, r, offset, contig_avail);
+        return _req_data + offset + 8;
+    }
+
+    void ShmChannel::req_commit(size_t body_len, MsgType type)
+    {
+        uint64_t w  = _ctrl->req_channel.write_idx.load(std::memory_order_relaxed);
+        uint64_t ds = _ctrl->req_channel.data_size;
+        uint64_t offset = w % ds;
+        uint32_t frame_len = static_cast<uint32_t>(8 + body_len);
+
+        LCZ_DEBUG("req_commit: offset=%lu body_len=%zu frame_len=%u type=%d",
+                  offset, body_len, frame_len, static_cast<int>(type));
+
+        // 写 frame header
+        memcpy(_req_data + offset, &frame_len, 4);
+        int32_t mt = static_cast<int32_t>(type);
+        memcpy(_req_data + offset + 4, &mt, 4);
+
+        // 公布新位置
+        _ctrl->req_channel.write_idx.store(w + frame_len, std::memory_order_release);
+        // 唤醒对端
+        notify_req();
+    }
+
+    char *ShmChannel::resp_write_ptr(size_t &contig_avail)
+    {
+        uint64_t w = _ctrl->resp_channel.write_idx.load(std::memory_order_relaxed);
+        uint64_t r = _ctrl->resp_channel.read_idx.load(std::memory_order_acquire);
+        uint64_t ds = _ctrl->resp_channel.data_size;
+        uint64_t used  = w - r;
+        uint64_t avail = ds - used;
+        if (avail < 8)
+        {
+            LCZ_DEBUG("resp_write_ptr: ring buffer full (avail=%lu)", avail);
+            contig_avail = 0;
+            return nullptr;
+        }
+        uint64_t offset = w % ds;
+        uint64_t contig = ds - offset;
+        uint64_t body_contig = std::min(avail, contig);
+        if (body_contig <= 8)
+        {
+            LCZ_DEBUG("resp_write_ptr: not enough contiguous space for header+body");
+            contig_avail = 0;
+            return nullptr;
+        }
+        contig_avail = body_contig - 8;
+        LCZ_DEBUG("resp_write_ptr: w=%lu r=%lu offset=%lu contig_avail=%zu", w, r, offset, contig_avail);
+        return _resp_data + offset + 8;
+    }
+
+    void ShmChannel::resp_commit(size_t body_len, MsgType type)
+    {
+        uint64_t w  = _ctrl->resp_channel.write_idx.load(std::memory_order_relaxed);
+        uint64_t ds = _ctrl->resp_channel.data_size;
+        uint64_t offset = w % ds;
+        uint32_t frame_len = static_cast<uint32_t>(8 + body_len);
+
+        LCZ_DEBUG("resp_commit: offset=%lu body_len=%zu frame_len=%u type=%d",
+                  offset, body_len, frame_len, static_cast<int>(type));
+
+        memcpy(_resp_data + offset, &frame_len, 4);
+        int32_t mt = static_cast<int32_t>(type);
+        memcpy(_resp_data + offset + 4, &mt, 4);
+
+        _ctrl->resp_channel.write_idx.store(w + frame_len, std::memory_order_release);
+        notify_resp();
     }
 
 } // namespace lcz_rpc

@@ -1,0 +1,27 @@
+// =============================================================================
+// rpc_message.fbs — SHM 零拷贝 RPC 消息的 FlatBuffers schema
+// =============================================================================
+// 编译: flatc --cpp -o <output_dir> rpc_message.fbs
+// 用于 ShmServerZc / ShmClientZc 的零拷贝请求/响应序列化
+
+namespace lcz_rpc.fb;
+
+// RPC 请求消息
+// 字段与 JsonRequest 对应，直接写入 ring buffer，读端零拷贝访问
+table RpcRequest {
+    id:       string;    // 请求 ID（= BaseMessage::_rid，零拷贝读写保留跨进程标识）
+    method:   string;    // 方法名
+    trace_id: string;    // 分布式追踪 ID
+    params:   [ubyte];   // 参数载荷（FlatBuffers 子消息或 JSON 字符串）
+}
+
+// RPC 响应消息
+// 字段与 JsonResponse 对应
+table RpcResponse {
+    id:     string;      // 对应请求的 rid（用于客户端匹配）
+    rcode:  int;         // 响应码（RespCode 枚举值）
+    result: [ubyte];     // 返回值载荷
+}
+
+root_type RpcRequest;
+root_type RpcResponse;

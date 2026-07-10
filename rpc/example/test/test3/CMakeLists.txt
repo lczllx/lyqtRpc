@@ -1,9 +1,12 @@
 add_executable(test3_topic_server server.cc)
+set_target_properties(test3_topic_server PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 target_link_libraries(test3_topic_server PRIVATE lcz_rpc)
 
 add_executable(test3_publish_client publish_client.cc)
+set_target_properties(test3_publish_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 target_link_libraries(test3_publish_client PRIVATE lcz_rpc)
 
 add_executable(test3_subscribe_client subscribe_client.cc)
+set_target_properties(test3_subscribe_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 target_link_libraries(test3_subscribe_client PRIVATE lcz_rpc)
 

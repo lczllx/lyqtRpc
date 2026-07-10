@@ -44,7 +44,9 @@ namespace lcz_rpc
         REQ_TOPIC_PROTO,   // 主题请求（纯 Proto）
         RSP_TOPIC_PROTO,   // 主题响应（纯 Proto）
         REQ_SERVICE_PROTO, // 服务请求（纯 Proto）
-        RSP_SERVICE_PROTO  // 服务响应（纯 Proto）
+        RSP_SERVICE_PROTO, // 服务响应（纯 Proto）
+        REQ_RPC_FLAT,      // RPC 请求（FlatBuffers，SHM 零拷贝）
+        RSP_RPC_FLAT,      // RPC 响应（FlatBuffers，SHM 零拷贝）
     };
 
     // 响应码类型定义

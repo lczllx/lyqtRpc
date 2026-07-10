@@ -49,7 +49,10 @@ else()
 endif()
 
 # Protobuf（路径二：纯 Proto RPC）
-find_package(Protobuf REQUIRED)
+find_package(Protobuf QUIET)
+if(NOT Protobuf_FOUND)
+    message(FATAL_ERROR "未找到 Protobuf。请安装:\n  Ubuntu/Debian: sudo apt install protobuf-compiler libprotobuf-dev\n  CentOS/RHEL:   sudo yum install protobuf-compiler protobuf-devel\n或运行 autobuild/build.sh 自动安装")
+endif()
 set(LCZ_PROTO_FILE "${CMAKE_CURRENT_SOURCE_DIR}/proto/rpc_envelope.proto")#protoc 编译 → .pb.cc + .pb.h
 set(LCZ_PROTOBUF_IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR})
 protobuf_generate_cpp(LCZ_PROTO_SRCS LCZ_PROTO_HDRS ${LCZ_PROTO_FILE})
@@ -91,6 +94,57 @@ if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/muduo/CMakeLists.txt")
     list(GET muduo_src_dir 0 muduo_dir)
     file(RENAME "${muduo_dir}" "${CMAKE_CURRENT_SOURCE_DIR}/muduo")
     message(STATUS "muduo 拉取完成")
+endif()
+
+# FlatBuffers（SHM 零拷贝序列化适配层）
+# 优先使用项目本地安装，其次系统安装
+set(_fb_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../flatbuffers_install")
+set(_fb_inc     "${_fb_prefix}/include")
+set(_fb_flatc   "${_fb_prefix}/bin/flatc")
+
+if(NOT EXISTS "${_fb_flatc}")
+  # 尝试系统安装
+  find_program(_fb_flatc NAMES flatc)
+  find_path(_fb_inc NAMES flatbuffers/flatbuffers.h PATHS /usr/include /usr/local/include)
+endif()
+
+if(EXISTS "${_fb_flatc}" AND EXISTS "${_fb_inc}")
+  set(FLATBUFFERS_COMPILER    "${_fb_flatc}")
+  set(FLATBUFFERS_INCLUDE_DIR "${_fb_inc}")
+  message(STATUS "FlatBuffers: flatc=${FLATBUFFERS_COMPILER} include=${FLATBUFFERS_INCLUDE_DIR}")
+else()
+  message(WARNING "未找到 FlatBuffers。SHM 零拷贝示例将跳过编译。\n  安装: sudo apt install flatbuffers-compiler libflatbuffers-dev")
+endif()
+
+# FlatBuffers schema 编译
+set(FLATBUFFERS_FBS_FILE "${CMAKE_CURRENT_SOURCE_DIR}/proto/rpc_message.fbs")
+set(FLATBUFFERS_GEN_DIR "${CMAKE_CURRENT_BINARY_DIR}/flatbuf_generated")
+if(EXISTS "${FLATBUFFERS_COMPILER}" AND EXISTS "${FLATBUFFERS_FBS_FILE}")
+  file(MAKE_DIRECTORY "${FLATBUFFERS_GEN_DIR}")
+  execute_process(
+    COMMAND "${FLATBUFFERS_COMPILER}" --cpp --gen-object-api
+            -o "${FLATBUFFERS_GEN_DIR}"
+            "${FLATBUFFERS_FBS_FILE}"
+    RESULT_VARIABLE flatc_result
+    OUTPUT_VARIABLE flatc_output
+    ERROR_VARIABLE  flatc_error
+  )
+  if(flatc_result EQUAL 0)
+    message(STATUS "FlatBuffers schema 编译成功 → ${FLATBUFFERS_GEN_DIR}")
+    # 创建 FlatBuffers 接口库
+    add_library(lcz_flatbuf INTERFACE)
+    target_include_directories(lcz_flatbuf INTERFACE
+      "${FLATBUFFERS_GEN_DIR}"
+      "${FLATBUFFERS_INCLUDE_DIR}"
+    )
+    set(LCZ_HAVE_FLATBUFFERS TRUE)
+  else()
+    message(WARNING "FlatBuffers schema 编译失败: ${flatc_error}")
+    set(LCZ_HAVE_FLATBUFFERS FALSE)
+  endif()
+else()
+  message(STATUS "FlatBuffers 编译器或 schema 不可用，跳过零拷贝示例")
+  set(LCZ_HAVE_FLATBUFFERS FALSE)
 endif()
 
 set(MUDUO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)#关掉 muduo 自带的 example

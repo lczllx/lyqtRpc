@@ -49,16 +49,18 @@ public:
         size_t p50_idx = latencies.size() * 0.5;
         size_t p90_idx = latencies.size() * 0.9;
         size_t p95_idx = latencies.size() * 0.95;
-        size_t p99_idx = latencies.size() * 0.99;
+        size_t p99_idx  = latencies.size() * 0.99;
+        size_t p999_idx = latencies.size() * 0.999;
 
-        double p50 = latencies[p50_idx];
-        double p90 = latencies[p90_idx];
-        double p95 = latencies[p95_idx];
-        double p99 = latencies[p99_idx];
+        double p50  = latencies[p50_idx];
+        double p90  = latencies[p90_idx];
+        double p95  = latencies[p95_idx];
+        double p99  = latencies[p99_idx];
+        double p999 = latencies[p999_idx];
         double min_lat = latencies[0];
         double max_lat = latencies[latencies.size() - 1];
 
-        std::cout << "\n========== 性能测试结果（JSON 序列化，原版副本）==========" << std::endl;
+        std::cout << "\n========== 性能测试结果（JSON 序列化）==========" << std::endl;
         std::cout << "总请求数: " << total_requests << std::endl;
         std::cout << "成功请求: " << success_count << std::endl;
         std::cout << "失败请求: " << fail_count << std::endl;
@@ -68,11 +70,12 @@ public:
         std::cout << "QPS: " << std::fixed << std::setprecision(2) << qps << std::endl;
         std::cout << "\n延迟统计 (微秒):" << std::endl;
         std::cout << "  最小值: " << std::fixed << std::setprecision(2) << min_lat << " us" << std::endl;
-        std::cout << "  平均值: " << std::fixed << std::setprecision(2) << avg << " us" << std::endl;
-        std::cout << "  P50:    " << std::fixed << std::setprecision(2) << p50 << " us" << std::endl;
-        std::cout << "  P90:    " << std::fixed << std::setprecision(2) << p90 << " us" << std::endl;
-        std::cout << "  P95:    " << std::fixed << std::setprecision(2) << p95 << " us" << std::endl;
-        std::cout << "  P99:    " << std::fixed << std::setprecision(2) << p99 << " us" << std::endl;
+        std::cout << "  平均值: " << std::fixed << std::setprecision(2) << avg   << " us" << std::endl;
+        std::cout << "  P50:    " << std::fixed << std::setprecision(2) << p50  << " us" << std::endl;
+        std::cout << "  P90:    " << std::fixed << std::setprecision(2) << p90  << " us" << std::endl;
+        std::cout << "  P95:    " << std::fixed << std::setprecision(2) << p95  << " us" << std::endl;
+        std::cout << "  P99:    " << std::fixed << std::setprecision(2) << p99  << " us" << std::endl;
+        std::cout << "  P999:   " << std::fixed << std::setprecision(2) << p999 << " us" << std::endl;
         std::cout << "  最大值: " << std::fixed << std::setprecision(2) << max_lat << " us" << std::endl;
         std::cout << "==================================\n" << std::endl;
     }

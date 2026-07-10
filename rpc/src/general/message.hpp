@@ -12,12 +12,15 @@ namespace lcz_rpc
     class JsonMessage:public BaseMessage
     {
         public:
-        using ptr = std::shared_ptr<JsonMessage>;  
-        // 将 _data 序列化为 JSON 字符串
+        using ptr = std::shared_ptr<JsonMessage>;
+        // 将 _data + _rid 序列化为 JSON 字符串
         virtual std::string serialize()override
         {
+            Json::Value copy = _data;
+            if (!rid().empty())
+                copy["id"] = rid();
             std::string output;
-            bool ret=JSON::serialize(_data,output);
+            bool ret=JSON::serialize(copy,output);
             if(!ret)
             {
                 LCZ_ERROR("Serialize failed!");
@@ -25,10 +28,13 @@ namespace lcz_rpc
             }
             return output;
         }
-        // 将字符串反序列化到 _data
+        // 将字符串反序列化到 _data + _rid
         virtual bool unserialize(const std::string &msg)override
         {
-            return JSON::deserialize(msg,_data);
+            bool ret = JSON::deserialize(msg,_data);
+            if (ret && _data.isMember("id"))
+                setId(_data["id"].asString());
+            return ret;
         }
         // JsonMessage 不额外校验，默认合法
         virtual bool check()override
@@ -924,6 +930,11 @@ namespace lcz_rpc
                 case MsgType::RSP_SERVICE_PROTO:
                     msg = std::make_shared<ProtoServiceResponse>();
                     break;
+                case MsgType::REQ_RPC_FLAT:
+                case MsgType::RSP_RPC_FLAT:
+                    // FlatBuffers 消息走 SHM 零拷贝路径，不经过 MessageFactory
+                    LCZ_ERROR("FlatBuffers messages must use ShmZcReader, not MessageFactory");
+                    return nullptr;
                 default:
                     LCZ_ERROR("Invalid message type!");
                     return nullptr;

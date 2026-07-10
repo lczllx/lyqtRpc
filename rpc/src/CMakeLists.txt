@@ -1,5 +1,8 @@
-#找系统已经有的CRUL库，方便后续链接，如果找不到 CURL，CMake 会报错并停止配置
-find_package(CURL REQUIRED)
+#找系统已安装的 CURL 库，方便后续链接
+find_package(CURL QUIET)
+if(NOT CURL_FOUND)
+    message(FATAL_ERROR "未找到 CURL。请安装:\n  Ubuntu/Debian: sudo apt install libcurl4-openssl-dev\n  CentOS/RHEL:   sudo yum install libcurl-devel\n或运行 autobuild/build.sh 自动安装")
+endif()
 
 #新增静态库 编译 registry_store 实现，给 lcz_rpc 链接用
 add_library(lcz_registry_store STATIC
