@@ -106,7 +106,7 @@ jobs:
         working-directory: rpc/build
         env:
           LCZ_ETCD: http://localhost:2379
-        run: ./tests/lcz_rpc_unit_tests
+        run: ./bin/lcz_rpc_unit_tests
 
       # SHM 零拷贝路径 smoke test：服务端启动 → 客户端发 3 个 add 请求 → 全部成功
       - name: SHM zero-copy smoke test
