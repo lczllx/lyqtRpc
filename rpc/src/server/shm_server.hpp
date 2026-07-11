@@ -17,6 +17,7 @@
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <sys/time.h>
 #include <unistd.h>
 #include <atomic>
 #include <thread>
@@ -40,21 +41,24 @@ public:
 
     void start() override {
         // 1. bind + listen
-        int listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (listen_fd < 0) {
+        _listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (_listen_fd < 0) {
             LCZ_ERROR("[ShmServer] socket failed errno=%d", errno); return;
         }
+        // 设置 accept 超时 500ms，stop() 后 accept 会在超时内返回而不会永远阻塞
+        struct timeval tv = {0, 500000};
+        setsockopt(_listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         struct sockaddr_un addr = {};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, _notify_path.c_str(), sizeof(addr.sun_path) - 1);
         unlink(_notify_path.c_str());
-        if (bind(listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        if (bind(_listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
             LCZ_ERROR("[ShmServer] bind failed errno=%d", errno);
-            close(listen_fd); return;
+            close(_listen_fd); return;
         }
-        if (listen(listen_fd, _max_clients) < 0) {
+        if (listen(_listen_fd, _max_clients) < 0) {
             LCZ_ERROR("[ShmServer] listen failed errno=%d", errno);
-            close(listen_fd); return;
+            close(_listen_fd); return;
         }
 
         // 2. 创建 worker（先加入 vector，再启动线程）
@@ -84,7 +88,7 @@ public:
         int next_id = 0;
         int round_robin = 0;
         while (_running) {
-            int conn_fd = accept(listen_fd, nullptr, nullptr);
+            int conn_fd = accept(_listen_fd, nullptr, nullptr);
             if (conn_fd < 0) break;
 
             if (next_id >= _max_clients) {
@@ -135,7 +139,7 @@ public:
                      next_id - 1, wid, shm_name.c_str(), req_fd);
         }
 
-        close(listen_fd);
+        close(_listen_fd);
         unlink(_notify_path.c_str());
 
         // 等待 worker 退出
@@ -144,11 +148,14 @@ public:
         }
     }
 
-    void stop() override { _running = false; }
-    ~ShmServer() {
+    void stop() override {
         _running = false;
+        if (_listen_fd >= 0) { close(_listen_fd); _listen_fd = -1; }
+    }
+    ~ShmServer() {
+        stop();
         for (auto& w : _workers) {
-            close(w->wake_pipe[1]); // 唤醒阻塞在 epoll_wait 的 worker
+            close(w->wake_pipe[1]);
         }
         for (auto& w : _workers) {
             for (auto& [fd, entry] : w->clients) {
@@ -225,6 +232,7 @@ private:
     size_t            _req_size, _resp_size;
     int               _max_clients;
     int               _worker_count;
+    int               _listen_fd = -1;
     std::atomic<bool> _running{false};
 
     std::vector<std::unique_ptr<Worker>> _workers;
