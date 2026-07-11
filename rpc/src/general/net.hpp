@@ -12,6 +12,7 @@
 #include <muduo/net/EventLoop.h>//事件循环
 #include <muduo/net/EventLoopThread.h>//事件循环线程
 #include <muduo/net/InetAddress.h>//网络地址
+#include <arpa/inet.h> // inet_pton
 #include <muduo/net/Buffer.h>//缓冲区
 #include <muduo/net/Callbacks.h>//回调函数
 #include <muduo/base/CountDownLatch.h>//倒计时器
@@ -345,9 +346,23 @@ namespace lcz_rpc
            
             MuduoClient(const std::string& sip,const int sport)
             :_protocol(ProtocolFactory::create())
-            ,_baceloop(_loopthread.startLoop())  // 独立的事件循环线程
+            ,_baceloop(_loopthread.startLoop())
             ,_downlatch(new muduo::CountDownLatch(1))
-            ,_client(_baceloop,muduo::net::InetAddress(sip,sport),"MuduoClient"){}
+            ,_client(_baceloop,resolveHost(sip,sport),"MuduoClient"){}
+          private:
+            // InetAddress(sip,sport) 不支持 DNS，手工解析 hostname
+            static muduo::net::InetAddress resolveHost(const std::string& host, uint16_t port) {
+                struct in_addr v4; struct in6_addr v6;
+                if (::inet_pton(AF_INET, host.c_str(), &v4) == 1 ||
+                    ::inet_pton(AF_INET6, host.c_str(), &v6) == 1) {
+                    return muduo::net::InetAddress(host, port);  // 已是 IP
+                }
+                muduo::net::InetAddress resolved;
+                if (muduo::net::InetAddress::resolve(host, &resolved))
+                    return muduo::net::InetAddress(resolved.toIp(), port);  // DNS 解析
+                return muduo::net::InetAddress(port);  // 回退
+            }
+          public:
             // 注入序列化器到协议层
             virtual void setSerializer(std::shared_ptr<ISerializer> s) override { _protocol->setSerializer(s); }
             // 连接建立/断开时更新 _connection

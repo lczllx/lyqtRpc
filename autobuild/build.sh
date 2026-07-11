@@ -122,6 +122,28 @@ print_info "Protobuf 已就绪 ✓"
 try_install_pkg "ldconfig -p 2>/dev/null | grep -q libcurl || test -f /usr/include/x86_64-linux-gnu/curl/curl.h || test -f /usr/include/curl/curl.h" "libcurl4-openssl-dev" "libcurl-devel"
 print_info "CURL 已就绪 ✓"
 
+# FlatBuffers（SHM 零拷贝 FlatBuf 路径，可选依赖；缺失则询问是否安装）
+try_install_optional() {
+    local check="$1" label="$2" pkg_apt="$3" pkg_yum="$4"
+    if eval "$check" 2>/dev/null; then
+        print_info "$label 已就绪 ✓"
+        return 0
+    fi
+    print_warn "$label 未安装（可选，用于 SHM FlatBuf ZC 示例）"
+    read -r -p "是否安装？(y/n) " -n 1
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        try_install_pkg "$check" "$pkg_apt" "$pkg_yum"
+    else
+        print_info "跳过 $label（SHM FlatBuf ZC 示例将不出现在编译中）"
+    fi
+}
+try_install_optional \
+  "ldconfig -p 2>/dev/null | grep -q libflatbuffers || test -f /usr/include/flatbuffers/flatbuffers.h || test -f $PROJECT_ROOT/flatbuffers_install/include/flatbuffers/flatbuffers.h" \
+  "FlatBuffers" \
+  "flatbuffers-compiler libflatbuffers-dev" \
+  "flatbuffers-compiler flatbuffers-devel"
+
 # 3. 初始化并更新git子模块（muduo）
 print_info "初始化 git 子模块（muduo）..."
 
@@ -192,12 +214,14 @@ fi
 
 print_info "编译成功 ✓"
 
-# 7. 显示构建结果（路径相对于项目根目录 RPC/）
+# 7. 显示构建结果
 cd "$PROJECT_ROOT"
 echo ""
 print_info "=========================================="
 print_info "构建完成！"
 print_info "=========================================="
+echo ""
+echo -e "${YELLOW}注意：以下命令均在项目根目录 RPC/ 下执行${NC}"
 echo ""
 print_info "所有可执行文件 (统一输出到 rpc/$BUILD_DIR/bin/):"
 if [ -d "rpc/$BUILD_DIR/bin" ]; then
@@ -208,35 +232,44 @@ fi
 
 echo ""
 print_info "常用运行示例:"
-echo "  # 基本 RPC（test1）"
-echo "  ./rpc/$BUILD_DIR/bin/test1_registry_server"
-echo "  ./rpc/$BUILD_DIR/bin/test1_rpc_server"
-echo "  ./rpc/$BUILD_DIR/bin/test1_rpc_client"
+echo "  # 基本 RPC（etcd 注册中心 + Provider + Consumer）"
+echo "  ./rpc/$BUILD_DIR/bin/test1_registry_server     # 注册中心（etcd）"
+echo "  ./rpc/$BUILD_DIR/bin/test1_rpc_server          # Provider（add 服务）"
+echo "  ./rpc/$BUILD_DIR/bin/test1_rpc_client          # Consumer（调用 add）"
 echo ""
-echo "  # 注册中心 + 发现（test4）"
-echo "  ./rpc/$BUILD_DIR/bin/test4_registry_server"
-echo "  ./rpc/$BUILD_DIR/bin/test4_provider_server"
-echo "  ./rpc/$BUILD_DIR/bin/test4_consumer_client"
+echo "  # 注册中心 + 服务发现（test4，Provider 注册/发现）"
+echo "  ./rpc/$BUILD_DIR/bin/test4_registry_server     # 注册中心"
+echo "  ./rpc/$BUILD_DIR/bin/test4_provider_server     # Provider"
+echo "  ./rpc/$BUILD_DIR/bin/test4_consumer_client     # Consumer"
 echo ""
-echo "  # 发布/订阅（test3）"
-echo "  ./rpc/$BUILD_DIR/bin/test3_topic_server"
-echo "  ./rpc/$BUILD_DIR/bin/test3_subscribe_client"
-echo "  ./rpc/$BUILD_DIR/bin/test3_publish_client"
+echo "  # 发布/订阅（test3，Topic 创建/订阅/发布）"
+echo "  ./rpc/$BUILD_DIR/bin/test3_topic_server        # Topic 服务端"
+echo "  ./rpc/$BUILD_DIR/bin/test3_subscribe_client    # 订阅者"
+echo "  ./rpc/$BUILD_DIR/bin/test3_publish_client      # 发布者"
 echo ""
-echo "  # 熔断/超时（test1）"
-echo "  ./rpc/$BUILD_DIR/bin/circuit_breaker_test_server"
-echo "  ./rpc/$BUILD_DIR/bin/circuit_breaker_test_client"
-echo "  ./rpc/$BUILD_DIR/bin/test1_slow_rpc_server"
-echo "  ./rpc/$BUILD_DIR/bin/test1_timeout_test_client"
+echo "  # 熔断/超时"
+echo "  ./rpc/$BUILD_DIR/bin/circuit_breaker_test_server   # 熔断器服务端"
+echo "  ./rpc/$BUILD_DIR/bin/circuit_breaker_test_client   # 熔断器客户端"
+echo "  ./rpc/$BUILD_DIR/bin/test1_slow_rpc_server         # 慢服务（触发超时）"
+echo "  ./rpc/$BUILD_DIR/bin/test1_timeout_test_client     # 超时测试客户端"
 echo ""
-echo "  # 共享内存/基准测试"
-echo "  ./rpc/$BUILD_DIR/bin/shm_server"
-echo "  ./rpc/$BUILD_DIR/bin/shm_client"
-echo "  ./rpc/$BUILD_DIR/bin/benchmark_server"
-echo "  ./rpc/$BUILD_DIR/bin/benchmark_client"
+echo "  # 共享内存 — JSON 路径"
+echo "  ./rpc/$BUILD_DIR/bin/shm_server     # SHM JSON 服务端"
+echo "  ./rpc/$BUILD_DIR/bin/shm_client     # SHM JSON 客户端"
 echo ""
-echo "  # 一键演示脚本"
+echo "  # 共享内存 — Protobuf 零拷贝（推荐）"
+echo "  ./rpc/$BUILD_DIR/bin/shm_proto_server     # SHM Proto ZC 服务端（4 worker）"
+echo "  ./rpc/$BUILD_DIR/bin/shm_proto_client     # SHM Proto ZC 客户端"
+echo ""
+echo "  # 压测（全部路径：JSON / FlatBuf ZC / SHM Proto ZC）"
+echo "  ./rpc/$BUILD_DIR/bin/benchmark_server             # TCP 压测服务端"
+echo "  ./rpc/$BUILD_DIR/bin/benchmark_client             # TCP 压测客户端"
+echo "  cd example/shm && bash run_shm_benchmark.sh all   # SHM 全路径对比压测"
+echo ""
+echo "  # 一键演示脚本（需 etcd 已启动）"
 echo "  bash demosh/demo.sh etcd"
 echo "  bash demosh/demo.sh all"
 echo ""
 print_info "构建脚本执行完成！"
+echo ""
+echo -e "${YELLOW}Docker 部署: bash autobuild/docker.sh build|compose|clean${NC}"

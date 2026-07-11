@@ -33,6 +33,7 @@ check_dep "Boost"       "dpkg -l libboost-dev 2>/dev/null | grep -q '^ii' || tes
 check_dep "jsoncpp"     "pkg-config --exists jsoncpp 2>/dev/null || test -f /usr/include/jsoncpp/json/json.h" "libjsoncpp-dev"
 check_dep "Protobuf"    "pkg-config --exists protobuf 2>/dev/null || test -f /usr/include/google/protobuf/descriptor.h" "protobuf-compiler libprotobuf-dev"
 check_dep "CURL"        "ldconfig -p 2>/dev/null | grep -q libcurl || test -f /usr/include/x86_64-linux-gnu/curl/curl.h || test -f /usr/include/curl/curl.h" "libcurl4-openssl-dev"
+check_dep "FlatBuf"     "test -f /usr/include/flatbuffers/flatbuffers.h 2>/dev/null || test -f $PROJECT_ROOT/flatbuffers_install/include/flatbuffers/flatbuffers.h 2>/dev/null" "flatbuffers-compiler libflatbuffers-dev"
 
 if [ "$MISSING_DEPS" -ne 0 ]; then
     echo ""

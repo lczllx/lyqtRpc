@@ -101,11 +101,11 @@ demo_etcd() {
         step 3 "停掉 registry 容器（docker-compose stop registry）"
         cd "$COMPOSE_DIR" && docker-compose stop registry 2>&1 | tail -1
         sleep 2
-        info "registry 容器已停止"
+        info "registry 容器已停止，provider 的 Lease 将随旧 registry 丢失"
     else
         step 3 "杀掉 registry 进程..."
         kill $REG_PID 2>/dev/null || true
-        sleep 1
+        sleep 3
         info "registry 已停止"
     fi
 
@@ -118,8 +118,18 @@ demo_etcd() {
         step 4 "重启 registry，从 etcd 恢复数据"
         "$BIN/test1_registry_server" > "$LOG_DIR/etcd_reg2.log" 2>&1 &
         REG_PID=$!
-        sleep 2
+        sleep 3
         info "registry 重启完成 (pid=$REG_PID)"
+
+        # Leese 随旧 registry 丢失，需重启 provider 使其重新注册
+        if [ "$PROV_PID" != "SKIPPED" ] && [ "$PROV_PID" != "" ]; then
+            kill $PROV_PID 2>/dev/null || true
+            sleep 1
+            "$BIN/test1_rpc_server" > "$LOG_DIR/etcd_prov.log" 2>&1 &
+            PROV_PID=$!
+            sleep 3
+            info "provider 已重新注册 (pid=$PROV_PID)"
+        fi
     fi
 
     step 5 "client 发起调用，验证服务可发现"

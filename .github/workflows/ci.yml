@@ -9,9 +9,10 @@
 #
 # 流程要点：
 #   1. checkout + submodules:recursive — 拉取 chenshuo/muduo
-#   2. apt 安装依赖（与 README 一致，含 libgtest-dev）
-#   3. 在 rpc/build 全量编译：examples + 单元测试（整库能编过）
+#   2. apt 安装依赖（与 README 一致，含 libgtest-dev + libflatbuffers-dev）
+#   3. 在 rpc/build 全量编译：examples（含 SHM Proto ZC）+ 单元测试
 #   4. 运行 lcz_rpc_unit_tests
+#   5. SHM 零拷贝路径 smoke test
 # =============================================================================
 
 name: CI
@@ -34,7 +35,7 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-22.04
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     services:
       etcd:
@@ -69,6 +70,8 @@ jobs:
             libcurl4-openssl-dev \
             protobuf-compiler \
             libprotobuf-dev \
+            libflatbuffers-dev \
+            flatbuffers-compiler \
             libgtest-dev
 
       # 提前失败并给出可读提示：仓库根是否含 rpc/、muduo 子模块是否拉下
@@ -104,6 +107,24 @@ jobs:
         env:
           LCZ_ETCD: http://localhost:2379
         run: ./tests/lcz_rpc_unit_tests
+
+      # SHM 零拷贝路径 smoke test：服务端启动 → 客户端发 3 个 add 请求 → 全部成功
+      - name: SHM zero-copy smoke test
+        working-directory: rpc/build
+        run: |
+          rm -f /dev/shm/lcz_shm_proto* lcz_shm_proto_notify
+          ./bin/shm_proto_server &
+          SERVER_PID=$!
+          sleep 1
+          timeout 15 ./bin/shm_proto_client 2>&1 | tee /tmp/shm_smoke.log
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          if grep -q "完成" /tmp/shm_smoke.log; then
+            echo "SHM zero-copy smoke test PASSED"
+          else
+            echo "::error title=SHM smoke test failed::客户端未完成全部 3 次请求"
+            exit 1
+          fi
 
   # 验证仓库根 Dockerfile 能构建（与上面并行，不推镜像到仓库）
   docker-image:

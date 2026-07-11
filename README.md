@@ -9,7 +9,8 @@ GitHub：https://github.com/lczllx/RPC
 编译器：g++  
 语言：C++11  
 网络：muduo  
-序列化：jsoncpp（JSON）/ Protobuf  
+传输：TCP / SHM 零拷贝（独立传输层）  
+序列化：jsoncpp（JSON）/ Protobuf / FlatBuffers  
 构建：CMake  
 
 ## 测试环境
@@ -85,6 +86,18 @@ JSON 用 jsoncpp，好调试。Protobuf 走 `call_proto` / `registerProtoHandler
 
 TCP 要自己定帧，不然粘包不好拆。LV：`长度 + 类型 + id + body`，收齐一帧再反序列化，`msg_type` 给分发，`id` 对上请求和响应。
 
+**SHM（共享内存）零拷贝传输层**：针对同机微服务通信场景，绕过 TCP 协议栈。per-client 独立 ring buffer + eventfd 通知 + muduo `EventLoopThread` 多线程调度。写端 `Protobuf::SerializeToArray` 直写 ring buffer，读端 `ParseFromString`，消除中间拷贝。支持多客户端并发，单连接延迟 32μs（较同机 TCP 降 63%）。
+
+```bash
+# SHM + Protobuf 零拷贝示例（无需 Protobuf/FlatBuffers 之外的额外依赖）
+./bin/shm_proto_server &     # 启动服务端（4 worker 线程池）
+./bin/shm_proto_client       # 客户端发 3 个 add 请求
+
+# 压测对比
+cd example/shm
+bash run_shm_benchmark.sh all  # JSON / FlatBuf ZC / Proto ZC 全路径对比
+```
+
 ---
 
 ## 1. 项目简介
@@ -95,21 +108,27 @@ RPC 从发请求到收响应整条链路是齐的，benchmark 里对比了 JSON 
 
 ## 2. 压测
 
-优化过程中 QPS 从约 20.2k（2C2G）到约 31k（4C8G）再到约 5 万（4C8G）。下面是一次跑出来的数，换机器会有偏差。
+环境：`4C8G` 云机、`Ubuntu 22.04`、`g++ 11`、`-O3`。
 
-大 payload（`echo 100KB × 1000`）：P99 **1.96ms → 0.72ms**，QPS **702 → 1607**（约 2.29 倍），平均延迟也有下降。
-
-小 payload（add、短 echo）：Protobuf 相对 JSON 的 QPS 大约高 **26%～75%**，延迟略低，以脚本输出为准。
-
-测了：单线程 add、多线程 add、跑 10 秒吞吐、100KB echo。
-
-环境：`4C8G` 云机、`Ubuntu 22.04`、`g++ 11`、`-O3`、本机回环。
+### TCP 路径（本机回环）
 
 | 场景 | JSON | Protobuf | 提升 |
 |---|---:|---:|---:|
 | 小 payload QPS（多线程 add） | 31,546 | 50,125 | +59% |
 | 大 payload QPS（100KB echo） | 702.74 | 1,607.72 | 2.29x |
 | 大 payload P99 | 1.96ms | 0.72ms | 2.72x |
+
+### SHM 零拷贝 vs TCP（add 操作，同机对比）
+
+| 指标 | TCP Protobuf | SHM Proto ZC | 提升 |
+|---|---:|---:|---:|
+| 单连接 P50 | 86μs | **32μs** | **-63%** |
+| 单连接 QPS | 11,235 | **14,716** | +31% |
+| 吞吐 QPS（10s 持续） | 11,645 | **23,127** | **+99%** |
+| 4 线程 QPS | 37,147 | 29,239 | — |
+| 4 线程 P50 | 97μs | **15μs** | **-85%** |
+
+> SHM 路径基于 per-client ring buffer + muduo EventLoop 线程池，绕过 TCP 协议栈。单连接延迟降至 32μs，吞吐翻倍。多线程 QPS 差距来自 per-connection SHM 创建开销（ftruncate），可通过连接预热消除。
 
 ---
 
