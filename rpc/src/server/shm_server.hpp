@@ -204,7 +204,7 @@ private:
                     if (!entry) continue;
 
                     uint64_t val;
-                    (void)::read(fd, &val, sizeof(val));
+                    ssize_t __attribute__((unused)) _rd = ::read(fd, &val, sizeof(val));
 
                     while (entry->channel.read_request(body, type)) {
                         auto msg = MessageFactory::create(type);

@@ -109,7 +109,7 @@ private:
 
             if (n > 0) {
                 uint64_t val;
-                (void)::read(resp_fd, &val, sizeof(val));
+                ssize_t __attribute__((unused)) _rd = ::read(resp_fd, &val, sizeof(val));
             }
 
             while (_channel.read_response(body, type)) {

@@ -245,7 +245,7 @@ TEST_F(ShmChannelTest, ShmConnectionPeerAddress) {
 
 // Server start + Client connect → send 请求 → Server 处理 → 回响应 → Client 收到
 TEST_F(ShmChannelTest, ServerClientRoundtrip) {
-    lcz_rpc::ShmServer server("lcz_shm_test", "lcz_shm_test_notify", 1024*1024, 1024*1024);
+    lcz_rpc::ShmServer server("lcz_shm_test_notify", "lcz_shm_test", 1024*1024, 1024*1024, 16, 1);
 
     bool handled = false;
     std::mutex mtx;
@@ -274,7 +274,7 @@ TEST_F(ShmChannelTest, ServerClientRoundtrip) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // Client 连接（后台 epoll 线程自动收响应）
-    lcz_rpc::ShmClient client("lcz_shm_test", "lcz_shm_test_notify");
+    lcz_rpc::ShmClient client("lcz_shm_test_notify");
     client.setMessageCallback([&](const lcz_rpc::BaseConnection::ptr&,
                                    lcz_rpc::BaseMessage::ptr& msg) {
         auto resp = std::dynamic_pointer_cast<lcz_rpc::RpcResponse>(msg);
