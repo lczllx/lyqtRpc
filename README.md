@@ -7,7 +7,7 @@
 GitHub：https://github.com/lczllx/RPC  
 开发环境：Ubuntu，VS Code  
 编译器：g++  
-语言：C++11  
+语言：C++17 
 网络：muduo  
 传输：TCP / SHM 零拷贝（独立传输层）  
 序列化：jsoncpp（JSON）/ Protobuf / FlatBuffers  
@@ -60,10 +60,10 @@ docker-compose up -d
 |------|------|
 | RPC 框架总行数 | 8,545（仅 `rpc/src/`，不含 muduo 子模块和 proto 生成代码） |
 | 自己写的行数 | 8,023（不含空行/注释） |
-| 单元测试 | 830+ 行，8 个测试文件，39 个测试用例（GTest） |
-| 示例代码 | 1,589 行 |
-| 源文件数 | 43（`rpc/src/` 下 .h/.hpp/.cc/.cpp） |
-| 测试覆盖范围 | LV 协议拆包/封包、消息工厂、消息校验、错误码、TokenBucket 限流、ISerializer 编解码 |
+| 单元测试 | 1,200+ 行，9 个测试文件，54 个测试用例（GTest） |
+| 示例代码 | 1,589 行（含 SHM 零拷贝示例 + 压测 1,100+ 行）|
+| 源文件数 | 56（`rpc/src/` 下 .h/.hpp/.cc/.cpp，含 SHM 零拷贝模块） |
+| 测试覆盖范围 | LV 协议拆包/封包、消息工厂、消息校验、错误码、TokenBucket 限流、ISerializer 编解码、ShmChannel 零拷贝读写/跨进程模拟 |
 
 ## 已知缺陷
 
@@ -74,7 +74,9 @@ docker-compose up -d
 - **静态 `pri_cursor`**：`TopicManager` 的优先级轮转游标是 `static` 变量，被所有 Topic 实例共享，多 topic 场景下轮转语义错乱。
 - **Topic 无持久化**：重启丢全部订阅关系和消息。
 - **无鉴权/加密**：无 TLS、无认证、无 token 机制。
-- **单元测试覆盖不足**：仅覆盖 LV 协议、消息层、令牌桶、序列化器，注册中心、熔断器、选举、网络层均无单测。
+- **单元测试覆盖不足**：仅覆盖 LV 协议、消息层、令牌桶、序列化器、ShmChannel，注册中心、熔断器、选举、网络层均无单测。
+- **SHM 大载荷不如 TCP**：ring buffer 两次 memcpy 是瓶颈，64KB 载荷 P50=1,254μs vs TCP Proto 668μs。
+- **SHM 并发扩展受限**：per-connection `ftruncate` 创建开销在短时压测中占比较高，4 线程 QPS 约 2.2× 单线程。
 
 ---
 
@@ -156,7 +158,17 @@ bash autobuild/quick_build.sh
 ```
 
 **Docker（可选）**  
-在仓库根（与 `Dockerfile` 同级）执行：`git submodule update --init --recursive` 后 `docker build -t lcz-rpc:local .`。
+`docker-compose.yml` 编排 etcd + registry + provider，一键启动完整 RPC 后端。
+
+```bash
+# 一键诊断 + 自动部署（推荐，自动处理代理/镜像源）
+bash autobuild/docker.sh doctor     # 诊断环境（Docker/权限/网络/Compose）
+bash autobuild/docker.sh setup      # 自动配网+构建镜像+启动服务
+
+# 或手动
+git submodule update --init --recursive
+docker compose up -d                # 构建 + 启动 etcd + registry + provider
+```
 
 完整构建（依赖检查、子模块等）：
 
@@ -208,6 +220,11 @@ make -j
 - Provider：`test/test1/rpc_server.cc`
 - Consumer：`test/test1/rpc_client.cc`
 - Benchmark：`benchmark/benchmark_server.cc`、`benchmark/benchmark_client.cc`
+- **共享内存零拷贝**：`shm/`（独立于 TCP 的传输层，per-client ring buffer + muduo EventLoop）
+  - JSON 路径：`shm_server.cc` / `shm_client.cc`
+  - FlatBuffers 零拷贝：`shm_server_zc.cc` / `shm_client_zc.cc`
+  - Protobuf 零拷贝（推荐）：`shm_proto_server.cc` / `shm_proto_client.cc`
+  - 压测 6 个 + `run_shm_benchmark.sh`（JSON / FlatBuf ZC / Proto ZC 全路径对比）
 
 > 可执行文件默认输出到 `rpc/build/bin`（含 benchmark 系列）。
 
@@ -220,9 +237,17 @@ make -j
   - `topic`   — 发布订阅 5 种转发策略
   - `circuit` — 熔断器：连续失败触发熔断 → 冷却后 HALF_OPEN 探测 → 恢复
 - `demo_discovery.sh`：注册发现（test4 registry / provider / consumer）
-- `demo_benchmark.sh`：JSON / Protobuf 压测入口
+  - 前置：etcd 需要提前启动（可单独 `docker compose up -d etcd` 或宿主机直接运行 etcd）
 
-**压测脚本**
+**SHM 压测**（在 `example/shm/` 下）：
+```bash
+cd example/shm
+bash run_shm_benchmark.sh all    # JSON / FlatBuf ZC / Proto ZC 全路径对比
+bash run_shm_benchmark.sh json   # 仅 JSON
+bash run_shm_benchmark.sh proto  # 仅 Protobuf 零拷贝
+```
+
+**TCP 压测**
 
 ```bash
 cd rpc/example/benchmark
@@ -408,6 +433,9 @@ RPC/
     │   └── rpc_envelope.proto  # RPC/Topic/Service 六个 protobuf envelope
     ├── src/
     │   ├── client/
+    │   │   ├── shm_client.hpp          # ShmClient（JSON）
+    │   │   ├── shm_client_zc.hpp       # ShmClient 零拷贝（FlatBuffers）
+    │   │   ├── shm_client_proto.hpp    # ShmClient 零拷贝（Protobuf，SerializeToArray）
     │   │   ├── rpc_client.hpp          # RpcClient + ClientDiscover + 连接池
     │   │   ├── rpc_registry.hpp        # Provider + Discover + MethodHost + 负载均衡
     │   │   ├── caller.hpp              # RpcCaller：同步/Future/回调 + call_proto
@@ -418,6 +446,9 @@ RPC/
     │   │   ├── node_breaker.cpp
     │   │   └── rpc_topic.hpp           # TopicClient
     │   ├── server/
+    │   │   ├── shm_server.hpp          # ShmServer（JSON，多客户端，worker 线程池 + SO_RCVTIMEO）
+    │   │   ├── shm_server_zc.hpp       # ShmServer 零拷贝（FlatBuffers）
+    │   │   ├── shm_server_proto.hpp    # ShmServer 零拷贝（Protobuf，muduo EventLoop）
     │   │   ├── rpc_server.hpp          # RpcServer + Provider 注册/心跳/负载上报
     │   │   ├── rpc_registry.hpp        # RegistryServer + PwithDManager + DiscoverManager
     │   │   ├── rpc_router.hpp          # RpcRouter + ProtoRpcRouter + ServiceManager
@@ -433,7 +464,10 @@ RPC/
     │   │   ├── etcd_circuit_store.hpp / .cpp     # etcd 熔断存储
     │   │   └── async_circuit_store.hpp / .cpp    # 异步批量持久化包装
     │   └── general/
-    │       ├── net.hpp                # MuduoServer/Client/Connection + LVProtocol
+    │       ├── shm_channel.hpp / .cc        # ShmChannel（创建/读写/零拷贝原语/eventfd 握手）
+    │       ├── shm_connection.hpp           # ShmConnection（虚拟连接适配 BaseConnection）
+    │       ├── shm_zc_adaptor.hpp           # RingBufAllocator + ShmZcReader（FlatBuf 零拷贝读）
+    │       ├── net.hpp                # MuduoServer/Client/Connection + LVProtocol + DNS 解析修复
     │       ├── message.hpp            # BaseMessage / JsonMessage / Proto 六个消息类
     │       ├── fields.hpp             # MsgType / RespCode / ServiceOpType 等枚举
     │       ├── abstract.hpp           # BaseServer / BaseProtocol / BaseClient 抽象
@@ -443,7 +477,8 @@ RPC/
     │       ├── rate_limiter.hpp       # TokenBucket 令牌桶限流器
     │       ├── serializer.hpp         # ISerializer + ProtobufSerializer
     │       └── log_system/            # 异步日志（双缓冲 + AsyncLooper）
-    ├── tests/                         # 单元测试（GTest，8 文件 39 用例）
+    ├── tests/                         # 单元测试（GTest，9 文件 54 用例）
+    │   ├── test_shm_channel.cc              # ShmChannel 零拷贝读写 + wrap 跳帧 + 跨进
     │   ├── test_lv_protocol.cc
     │   ├── test_lv_more_messages.cc
     │   ├── test_message_factory.cc
@@ -453,6 +488,7 @@ RPC/
     │   ├── test_rate_limiter.cc
     │   └── test_serializer.cc
     └── example/                       # 示例 + 压测 + 单测辅助
+        ├── shm/                             # SHM 零拷贝示例 + 压测（12 个文件 + run_shm_benchmark.sh）
         ├── benchmark/                 # benchmark_server/client（Proto + JSON）
         └── test/
             ├── despacher_*_test.cc    # 分发器功能测试
