@@ -1,0 +1,898 @@
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client single echo 0 0 30 16
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 16B
+Sending EchoRequest at qps=26862 latency=26
+Sending EchoRequest at qps=24784 latency=30
+Sending EchoRequest at qps=23888 latency=30
+Sending EchoRequest at qps=24992 latency=29
+Sending EchoRequest at qps=26056 latency=28
+Sending EchoRequest at qps=25860 latency=28
+Sending EchoRequest at qps=26323 latency=27
+Sending EchoRequest at qps=24827 latency=30
+Sending EchoRequest at qps=26310 latency=27
+Sending EchoRequest at qps=26539 latency=27
+Sending EchoRequest at qps=25054 latency=29
+Sending EchoRequest at qps=29712 latency=23
+Sending EchoRequest at qps=25777 latency=29
+Sending EchoRequest at qps=25514 latency=28
+Sending EchoRequest at qps=30066 latency=23
+Sending EchoRequest at qps=25894 latency=28
+Sending EchoRequest at qps=24705 latency=30
+Sending EchoRequest at qps=22398 latency=34
+Sending EchoRequest at qps=22979 latency=33
+Sending EchoRequest at qps=25793 latency=28
+Sending EchoRequest at qps=24399 latency=31
+Sending EchoRequest at qps=23602 latency=31
+Sending EchoRequest at qps=24688 latency=30
+Sending EchoRequest at qps=25552 latency=29
+Sending EchoRequest at qps=25596 latency=28
+Sending EchoRequest at qps=24285 latency=30
+Sending EchoRequest at qps=28821 latency=24
+Sending EchoRequest at qps=24373 latency=30
+Sending EchoRequest at qps=24635 latency=30
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 769132  成功: 769132  失败: 0  成功率: 100.00%
+耗时: 30501 ms  QPS: 25216.62
+
+延迟 (微秒):
+  Min:  9.00 us
+  P50:  28.00 us
+  P90:  35.00 us
+  P95:  37.00 us
+  P99:  50.00 us
+  P999: 142.00 us
+  Max:  3907.00 us
+==========================================
+
+
+cz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client single echo 0 0 30 65536
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 65536B
+Sending EchoRequest at qps=11800 latency=71
+Sending EchoRequest at qps=11601 latency=73
+Sending EchoRequest at qps=11705 latency=71
+Sending EchoRequest at qps=12340 latency=68
+Sending EchoRequest at qps=12335 latency=68
+Sending EchoRequest at qps=12049 latency=69
+Sending EchoRequest at qps=12276 latency=67
+Sending EchoRequest at qps=12869 latency=64
+Sending EchoRequest at qps=10680 latency=81
+Sending EchoRequest at qps=11827 latency=72
+Sending EchoRequest at qps=10829 latency=80
+Sending EchoRequest at qps=11007 latency=78
+Sending EchoRequest at qps=12035 latency=70
+Sending EchoRequest at qps=12026 latency=70
+Sending EchoRequest at qps=12075 latency=70
+Sending EchoRequest at qps=11463 latency=74
+Sending EchoRequest at qps=11967 latency=70
+Sending EchoRequest at qps=11396 latency=75
+Sending EchoRequest at qps=11603 latency=73
+Sending EchoRequest at qps=11507 latency=74
+Sending EchoRequest at qps=11614 latency=73
+Sending EchoRequest at qps=11500 latency=74
+Sending EchoRequest at qps=11392 latency=74
+Sending EchoRequest at qps=11811 latency=72
+Sending EchoRequest at qps=11246 latency=76
+Sending EchoRequest at qps=11406 latency=75
+Sending EchoRequest at qps=12015 latency=71
+Sending EchoRequest at qps=11519 latency=74
+Sending EchoRequest at qps=11873 latency=72
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 352352  成功: 352352  失败: 0  成功率: 100.00%
+耗时: 30501 ms  QPS: 11552.15
+
+延迟 (微秒):
+  Min:  28.00 us
+  P50:  68.00 us
+  P90:  88.00 us
+  P95:  120.00 us
+  P99:  156.00 us
+  P999: 298.00 us
+  Max:  7302.00 us
+==========================================
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client steady echo 0 0 20 0 127.0.0.1 8889 0 16
+========== RPC 性能测试（默认 Protobuf）==========
+方法名: echo，payload 大小: 16 字节（大 payload 对比）
+测试类型: steady
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 02:07:48.294570Z 1238069 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x5637C581BF50 - TcpClient.cc:69
+20260712 02:07:48.294581Z 1238069 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+稳态测试，持续 20 秒
+Sending EchoRequest at qps=10712 latency=92
+Sending EchoRequest at qps=10662 latency=93
+Sending EchoRequest at qps=10171 latency=97
+Sending EchoRequest at qps=11108 latency=89
+Sending EchoRequest at qps=10690 latency=92
+Sending EchoRequest at qps=10432 latency=95
+Sending EchoRequest at qps=10498 latency=94
+Sending EchoRequest at qps=10287 latency=96
+Sending EchoRequest at qps=10355 latency=95
+Sending EchoRequest at qps=10661 latency=93
+Sending EchoRequest at qps=10663 latency=93
+Sending EchoRequest at qps=10509 latency=94
+Sending EchoRequest at qps=10428 latency=95
+Sending EchoRequest at qps=10810 latency=91
+Sending EchoRequest at qps=10212 latency=97
+Sending EchoRequest at qps=11408 latency=86
+Sending EchoRequest at qps=11106 latency=89
+Sending EchoRequest at qps=10615 latency=93
+Sending EchoRequest at qps=10768 latency=92
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 213784
+成功请求: 213784
+失败请求: 0
+成功率: 100.00%
+测试时长: 20000 ms
+QPS: 10689.20
+
+延迟统计 (微秒):
+  最小值: 59.00 us
+  平均值: 92.85 us
+  P50:    89.00 us
+  P90:    107.00 us
+  P95:    113.00 us
+  P99:    155.00 us
+  P999:   409.00 us
+  最大值: 5883.00 us
+==================================
+
+20260712 02:08:08.604824Z 1238069 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x5637C581BF50 - TcpClient.cc:75
+
+
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client steady echo 0 0 20 0 127.0.0.1 8889 0 65536
+========== RPC 性能测试（默认 Protobuf）==========
+方法名: echo，payload 大小: 65536 字节（大 payload 对比）
+测试类型: steady
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 02:09:30.057263Z 1238829 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x5651525D5F50 - TcpClient.cc:69
+20260712 02:09:30.057279Z 1238829 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+稳态测试，持续 20 秒
+Sending EchoRequest at qps=2052 latency=466
+Sending EchoRequest at qps=2362 latency=405
+Sending EchoRequest at qps=2212 latency=431
+Sending EchoRequest at qps=2137 latency=449
+Sending EchoRequest at qps=2739 latency=350
+Sending EchoRequest at qps=2308 latency=418
+Sending EchoRequest at qps=2228 latency=433
+Sending EchoRequest at qps=2114 latency=455
+Sending EchoRequest at qps=2040 latency=471
+Sending EchoRequest at qps=2014 latency=476
+Sending EchoRequest at qps=2055 latency=467
+Sending EchoRequest at qps=2066 latency=464
+Sending EchoRequest at qps=2051 latency=468
+Sending EchoRequest at qps=2077 latency=462
+Sending EchoRequest at qps=2300 latency=414
+Sending EchoRequest at qps=2001 latency=478
+Sending EchoRequest at qps=2019 latency=474
+Sending EchoRequest at qps=1980 latency=483
+Sending EchoRequest at qps=1973 latency=485
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 42781
+成功请求: 42781
+失败请求: 0
+成功率: 100.00%
+测试时长: 20000 ms
+QPS: 2139.05
+
+延迟统计 (微秒):
+  最小值: 266.00 us
+  平均值: 448.48 us
+  P50:    445.00 us
+  P90:    532.00 us
+  P95:    564.00 us
+  P99:    664.00 us
+  P999:   1245.00 us
+  最大值: 6179.00 us
+==================================
+
+20260712 02:09:50.361096Z 1238829 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x5651525D5F50 - TcpClient.cc:75
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client multi echo 0 4 20 "" 16
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: multi  方法: echo  载荷: 0B
+Sending EchoRequest at qps=34396 latency=19
+Sending EchoRequest at qps=43960 latency=13
+Sending EchoRequest at qps=43193 latency=13
+Sending EchoRequest at qps=33346 latency=19
+Sending EchoRequest at qps=39842 latency=15
+Sending EchoRequest at qps=43848 latency=13
+Sending EchoRequest at qps=43706 latency=13
+Sending EchoRequest at qps=39490 latency=15
+Sending EchoRequest at qps=32793 latency=19
+Sending EchoRequest at qps=28162 latency=25
+Sending EchoRequest at qps=20253 latency=36
+Sending EchoRequest at qps=21631 latency=33
+Sending EchoRequest at qps=38354 latency=15
+Sending EchoRequest at qps=21790 latency=31
+Sending EchoRequest at qps=34995 latency=18
+Sending EchoRequest at qps=22650 latency=31
+Sending EchoRequest at qps=36403 latency=15
+Sending EchoRequest at qps=30110 latency=22
+Sending EchoRequest at qps=45331 latency=12
+Sending EchoRequest at qps=26060 latency=26
+Sending EchoRequest at qps=37542 latency=16
+Sending EchoRequest at qps=27946 latency=24
+Sending EchoRequest at qps=30822 latency=21
+Sending EchoRequest at qps=27615 latency=26
+Sending EchoRequest at qps=30452 latency=22
+Sending EchoRequest at qps=36510 latency=17
+Sending EchoRequest at qps=21427 latency=35
+Sending EchoRequest at qps=25297 latency=28
+Sending EchoRequest at qps=38178 latency=16
+Sending EchoRequest at qps=42300 latency=13
+Sending EchoRequest at qps=27173 latency=25
+Sending EchoRequest at qps=28656 latency=23
+Sending EchoRequest at qps=40901 latency=14
+Sending EchoRequest at qps=34905 latency=17
+Sending EchoRequest at qps=42513 latency=13
+Sending EchoRequest at qps=31642 latency=20
+Sending EchoRequest at qps=42878 latency=13
+Sending EchoRequest at qps=31813 latency=20
+Sending EchoRequest at qps=42765 latency=13
+Sending EchoRequest at qps=36772 latency=16
+Sending EchoRequest at qps=38145 latency=15
+Sending EchoRequest at qps=36462 latency=16
+Sending EchoRequest at qps=40654 latency=14
+Sending EchoRequest at qps=36387 latency=16
+Sending EchoRequest at qps=28288 latency=24
+Sending EchoRequest at qps=27069 latency=23
+Sending EchoRequest at qps=25951 latency=26
+Sending EchoRequest at qps=27735 latency=24
+Sending EchoRequest at qps=33086 latency=19
+Sending EchoRequest at qps=34772 latency=18
+Sending EchoRequest at qps=33751 latency=18
+Sending EchoRequest at qps=34924 latency=17
+Sending EchoRequest at qps=34138 latency=18
+Sending EchoRequest at qps=22515 latency=33
+Sending EchoRequest at qps=22361 latency=32
+Sending EchoRequest at qps=25990 latency=26
+Sending EchoRequest at qps=23454 latency=30
+Sending EchoRequest at qps=23558 latency=29
+Sending EchoRequest at qps=27869 latency=26
+Sending EchoRequest at qps=23589 latency=28
+Sending EchoRequest at qps=27544 latency=25
+Sending EchoRequest at qps=26779 latency=26
+Sending EchoRequest at qps=25940 latency=27
+Sending EchoRequest at qps=30256 latency=22
+Sending EchoRequest at qps=24571 latency=28
+Sending EchoRequest at qps=36141 latency=17
+Sending EchoRequest at qps=Sending EchoRequest at qps=24453 latency=2726093
+ latency=27
+Sending EchoRequest at qps=34407 latency=19
+Sending EchoRequest at qps=27569 latency=24
+Sending EchoRequest at qps=33986 latency=19
+Sending EchoRequest at qps=29956 latency=22
+Sending EchoRequest at qps=28752 latency=23
+Sending EchoRequest at qps=32369 latency=20
+Sending EchoRequest at qps=28557 latency=24
+Sending EchoRequest at qps=30017 latency=22
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 2526872  成功: 2526872  失败: 0  成功率: 100.00%
+耗时: 20502 ms  QPS: 123250.02
+
+延迟 (微秒):
+  Min:  7.00 us
+  P50:  17.00 us
+  P90:  34.00 us
+  P95:  41.00 us
+  P99:  58.00 us
+  P999: 111.00 us
+  Max:  9963.00 us
+==========================================
+
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client multi echo 0 4 20 "" 16
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: multi  方法: echo  载荷: 0B
+Sending EchoRequest at qps=38819 latency=15
+Sending EchoRequest at qps=41851 latency=13
+Sending EchoRequest at qps=39120 latency=15
+Sending EchoRequest at qps=41250 latency=14
+Sending EchoRequest at qps=43502 latency=13
+Sending EchoRequest at qps=34244 latency=18
+Sending EchoRequest at qps=38525 latency=15
+Sending EchoRequest at qps=35989 latency=17
+Sending EchoRequest at qps=37374 latency=16
+Sending EchoRequest at qps=30547 latency=22
+Sending EchoRequest at qps=29468 latency=22
+Sending EchoRequest at qps=37555 latency=16
+Sending EchoRequest at qps=31859 latency=19
+Sending EchoRequest at qps=24398 latency=27
+Sending EchoRequest at qps=27172 latency=24
+Sending EchoRequest at qps=32162 latency=21
+Sending EchoRequest at qps=33642 latency=18
+Sending EchoRequest at qps=29932 latency=22
+Sending EchoRequest at qps=31076 latency=22
+Sending EchoRequest at qps=30722 latency=22
+Sending EchoRequest at qps=39446 latency=15
+Sending EchoRequest at qps=22276 latency=34
+Sending EchoRequest at qps=26345 latency=26
+Sending EchoRequest at qps=21287 latency=36
+Sending EchoRequest at qps=26937 latency=23
+Sending EchoRequest at qps=32653 latency=20
+Sending EchoRequest at qps=21556 latency=34
+Sending EchoRequest at qps=22980 latency=32
+Sending EchoRequest at qps=26865 latency=26
+Sending EchoRequest at qps=34403 latency=18
+Sending EchoRequest at qps=31587 latency=19
+Sending EchoRequest at qps=28173 latency=25
+Sending EchoRequest at qps=26975 latency=26
+Sending EchoRequest at qps=37768 latency=15
+Sending EchoRequest at qps=33807 latency=18
+Sending EchoRequest at qps=28753 latency=24
+Sending EchoRequest at qps=24187 latency=28
+Sending EchoRequest at qps=42683 latency=13
+Sending EchoRequest at qps=41835 latency=13
+Sending EchoRequest at qps=24794 latency=26
+Sending EchoRequest at qps=44943 latency=12
+Sending EchoRequest at qps=41424 latency=14
+Sending EchoRequest at qps=43448 latency=13
+Sending EchoRequest at qps=40861 latency=14
+Sending EchoRequest at qps=29430 latency=23
+Sending EchoRequest at qps=39612 latency=15
+Sending EchoRequest at qps=Sending EchoRequest at qps=33728 latency=19
+35664 latency=17
+Sending EchoRequest at qps=26643 latency=24
+Sending EchoRequest at qps=29937 latency=23
+Sending EchoRequest at qps=30247 latency=20
+Sending EchoRequest at qps=23525 latency=31
+Sending EchoRequest at qps=25698 latency=26
+Sending EchoRequest at qps=27843 latency=22
+Sending EchoRequest at qps=27909 latency=23
+Sending EchoRequest at qps=24134 latency=29
+Sending EchoRequest at qps=39211 latency=15
+Sending EchoRequest at qps=42205 latency=13
+Sending EchoRequest at qps=43792 latency=13
+Sending EchoRequest at qps=42075 latency=13
+Sending EchoRequest at qps=42482 latency=13
+Sending EchoRequest at qps=41540 latency=14
+Sending EchoRequest at qps=43496 latency=13
+Sending EchoRequest at qps=44936 latency=12
+Sending EchoRequest at qps=40069 latency=14
+Sending EchoRequest at qps=40698 latency=14
+Sending EchoRequest at qps=43506 latency=13
+Sending EchoRequest at qps=40050 latency=14
+Sending EchoRequest at qps=44185 latency=13
+Sending EchoRequest at qps=35146 latency=18
+Sending EchoRequest at qps=44477 latency=13
+Sending EchoRequest at qps=33657 latency=18
+Sending EchoRequest at qps=43767 latency=13
+Sending EchoRequest at qps=30952 latency=21
+Sending EchoRequest at qps=23509 latency=29
+Sending EchoRequest at qps=20831 latency=34
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 2716516  成功: 2716516  失败: 0  成功率: 100.00%
+耗时: 20502 ms  QPS: 132500.05
+
+延迟 (微秒):
+  Min:  8.00 us
+  P50:  15.00 us
+  P90:  30.00 us
+  P95:  36.00 us
+  P99:  53.00 us
+  P999: 99.00 us
+  Max:  16086.00 us
+==========================================
+
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client single echo 0 0 20 "" 65536
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 0B
+Sending EchoRequest at qps=23474 latency=32
+Sending EchoRequest at qps=24634 latency=30
+Sending EchoRequest at qps=24793 latency=29
+Sending EchoRequest at qps=23982 latency=31
+Sending EchoRequest at qps=23146 latency=32
+Sending EchoRequest at qps=23554 latency=32
+Sending EchoRequest at qps=23460 latency=32
+Sending EchoRequest at qps=24095 latency=30
+Sending EchoRequest at qps=24949 latency=30
+Sending EchoRequest at qps=24648 latency=30
+Sending EchoRequest at qps=26729 latency=27
+Sending EchoRequest at qps=24068 latency=31
+Sending EchoRequest at qps=23588 latency=32
+Sending EchoRequest at qps=21272 latency=36
+Sending EchoRequest at qps=24132 latency=31
+Sending EchoRequest at qps=28650 latency=25
+Sending EchoRequest at qps=23570 latency=31
+Sending EchoRequest at qps=27283 latency=26
+Sending EchoRequest at qps=22735 latency=33
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 484795  成功: 484795  失败: 0  成功率: 100.00%
+耗时: 20501 ms  QPS: 23647.38
+
+延迟 (微秒):
+  Min:  11.00 us
+  P50:  30.00 us
+  P90:  36.00 us
+  P95:  39.00 us
+  P99:  53.00 us
+  P999: 168.00 us
+  Max:  4420.00 us
+==========================================
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client single echo 0 0 15 "" 1024
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 0B
+Sending EchoRequest at qps=27358 latency=26
+Sending EchoRequest at qps=25162 latency=29
+Sending EchoRequest at qps=25151 latency=29
+Sending EchoRequest at qps=25557 latency=29
+Sending EchoRequest at qps=22716 latency=33
+Sending EchoRequest at qps=23499 latency=32
+Sending EchoRequest at qps=22766 latency=32
+Sending EchoRequest at qps=22206 latency=34
+Sending EchoRequest at qps=22988 latency=33
+Sending EchoRequest at qps=24226 latency=31
+Sending EchoRequest at qps=23604 latency=31
+Sending EchoRequest at qps=23651 latency=31
+Sending EchoRequest at qps=22979 latency=32
+Sending EchoRequest at qps=25433 latency=28
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 364611  成功: 364611  失败: 0  成功率: 100.00%
+耗时: 15501 ms  QPS: 23521.77
+
+延迟 (微秒):
+  Min:  10.00 us
+  P50:  30.00 us
+  P90:  37.00 us
+  P95:  39.00 us
+  P99:  55.00 us
+  P999: 248.00 us
+  Max:  4467.00 us
+==========================================
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client single echo 0 0 15 "" 4096
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 0B
+Sending EchoRequest at qps=24687 latency=30
+Sending EchoRequest at qps=23439 latency=32
+Sending EchoRequest at qps=22283 latency=33
+Sending EchoRequest at qps=23760 latency=31
+Sending EchoRequest at qps=21783 latency=35
+Sending EchoRequest at qps=22470 latency=33
+Sending EchoRequest at qps=23491 latency=32
+Sending EchoRequest at qps=24626 latency=30
+Sending EchoRequest at qps=23391 latency=32
+Sending EchoRequest at qps=23324 latency=32
+Sending EchoRequest at qps=23365 latency=32
+Sending EchoRequest at qps=22938 latency=32
+Sending EchoRequest at qps=22866 latency=33
+Sending EchoRequest at qps=22746 latency=33
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 346818  成功: 346818  失败: 0  成功率: 100.00%
+耗时: 15501 ms  QPS: 22373.91
+
+延迟 (微秒):
+  Min:  10.00 us
+  P50:  32.00 us
+  P90:  38.00 us
+  P95:  41.00 us
+  P99:  54.00 us
+  P999: 151.00 us
+  Max:  4193.00 us
+==========================================
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_proto_client multi echo 0 4 20 "" 16
+========== SHM Proto 零拷贝 RPC 性能测试 ==========
+测试类型: multi  方法: echo  载荷: 0B
+Sending EchoRequest at qps=21105 latency=36
+Sending EchoRequest at qps=26314 latency=26
+Sending EchoRequest at qps=22316 latency=33
+Sending EchoRequest at qps=25531 latency=28
+Sending EchoRequest at qps=20775 latency=37
+Sending EchoRequest at qps=29951 latency=22
+Sending EchoRequest at qps=27418 latency=22
+Sending EchoRequest at qps=24604 latency=30
+Sending EchoRequest at qps=21199 latency=33
+Sending EchoRequest at qps=17682 latency=42
+Sending EchoRequest at qps=23970 latency=30
+Sending EchoRequest at qps=19152 latency=38
+Sending EchoRequest at qps=41203 latency=14
+Sending EchoRequest at qps=26516 latency=26
+Sending EchoRequest at qps=21836 latency=32
+Sending EchoRequest at qps=26168 latency=27
+Sending EchoRequest at qps=25834 latency=26
+Sending EchoRequest at qps=29015 latency=22
+Sending EchoRequest at qps=28859 latency=24
+Sending EchoRequest at qps=21653 latency=34
+Sending EchoRequest at qps=21989 latency=33
+Sending EchoRequest at qps=41197 latency=14
+Sending EchoRequest at qps=26137 latency=25
+Sending EchoRequest at qps=25209 latency=28
+Sending EchoRequest at qps=43912 latency=13
+Sending EchoRequest at qps=22663 latency=30
+Sending EchoRequest at qps=34178 latency=17
+Sending EchoRequest at qps=27994 latency=25
+Sending EchoRequest at qps=45505 latency=12
+Sending EchoRequest at qps=22239 latency=30
+Sending EchoRequest at qps=28895 latency=22
+Sending EchoRequest at qps=34568 latency=19
+Sending EchoRequest at qps=20050 latency=36
+Sending EchoRequest at qps=28417 latency=24
+Sending EchoRequest at qps=24065 latency=28
+Sending EchoRequest at qps=41418 latency=14
+Sending EchoRequest at qps=22425 latency=32
+Sending EchoRequest at qps=43419 latency=13
+Sending EchoRequest at qps=22182 latency=32
+Sending EchoRequest at qps=39640 latency=15
+Sending EchoRequest at qps=22703 latency=32
+Sending EchoRequest at qps=39755 latency=14
+Sending EchoRequest at qps=21036 latency=34
+Sending EchoRequest at qps=25677 latency=28
+Sending EchoRequest at qps=19054 latency=38
+Sending EchoRequest at qps=39546 latency=15
+Sending EchoRequest at qps=18038 latency=39
+Sending EchoRequest at qps=30171 latency=23
+Sending EchoRequest at qps=24320 latency=29
+Sending EchoRequest at qps=29999 latency=22
+Sending EchoRequest at qps=24582 latency=29
+Sending EchoRequest at qps=30896 latency=21
+Sending EchoRequest at qps=21251 latency=33
+Sending EchoRequest at qps=21134 latency=34
+Sending EchoRequest at qps=28013 latency=24
+Sending EchoRequest at qps=32424 latency=19
+Sending EchoRequest at qps=38710 latency=15
+Sending EchoRequest at qps=42812 latency=13
+Sending EchoRequest at qps=38432 latency=16
+Sending EchoRequest at qps=45654 latency=12
+Sending EchoRequest at qps=38601 latency=15
+Sending EchoRequest at qps=42793 latency=13
+Sending EchoRequest at qps=38840 latency=16
+Sending EchoRequest at qps=41900 latency=13
+Sending EchoRequest at qps=34312 latency=18
+Sending EchoRequest at qps=41908 latency=14
+Sending EchoRequest at qps=33049 latency=19
+Sending EchoRequest at qps=43633 latency=13
+Sending EchoRequest at qps=22233 latency=31
+Sending EchoRequest at qps=19652 latency=34
+Sending EchoRequest at qps=22882 latency=29
+Sending EchoRequest at qps=30489 latency=22
+Sending EchoRequest at qps=29012 latency=22
+Sending EchoRequest at qps=27829 latency=25
+Sending EchoRequest at qps=28407 latency=24
+Sending EchoRequest at qps=29434 latency=23
+
+========== SHM Proto 零拷贝 RPC 性能测试结果 ==========
+总请求: 2345579  成功: 2345579  失败: 0  成功率: 100.00%
+耗时: 20502 ms  QPS: 114407.33
+
+延迟 (微秒):
+  Min:  8.00 us
+  P50:  19.00 us
+  P90:  38.00 us
+  P95:  45.00 us
+  P99:  63.00 us
+  P999: 122.00 us
+  Max:  15475.00 us
+==========================================
+
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_client single echo 0 0 20 "" 16
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 16B
+Sending EchoRequest at qps=12853 latency=65
+Sending EchoRequest at qps=14863 latency=56
+Sending EchoRequest at qps=14594 latency=56
+Sending EchoRequest at qps=14083 latency=59
+Sending EchoRequest at qps=13041 latency=64
+Sending EchoRequest at qps=12850 latency=65
+Sending EchoRequest at qps=12900 latency=65
+Sending EchoRequest at qps=13991 latency=59
+Sending EchoRequest at qps=14402 latency=58
+Sending EchoRequest at qps=13956 latency=59
+Sending EchoRequest at qps=14545 latency=56
+Sending EchoRequest at qps=13813 latency=60
+Sending EchoRequest at qps=15183 latency=54
+Sending EchoRequest at qps=14875 latency=56
+Sending EchoRequest at qps=15261 latency=54
+Sending EchoRequest at qps=13669 latency=61
+Sending EchoRequest at qps=14428 latency=57
+Sending EchoRequest at qps=14609 latency=57
+Sending EchoRequest at qps=15182 latency=54
+
+========== SHM RPC 性能测试结果 ==========
+总请求: 283099  成功: 283099  失败: 0  成功率: 100.00%
+耗时: 20501 ms  QPS: 13809.03
+
+延迟 (微秒):
+  Min:  32.00 us
+  P50:  57.00 us
+  P90:  71.00 us
+  P95:  76.00 us
+  P99:  98.00 us
+  P999: 230.00 us
+  Max:  4182.00 us
+==========================================
+
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client steady echo 0 0 20 0 127.0.0.1 8889 0 16
+========== RPC 性能测试（默认 Protobuf）==========
+方法名: echo，payload 大小: 16 字节（大 payload 对比）
+测试类型: steady
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 08:57:27.935727Z 1395100 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x556D4ECE9F50 - TcpClient.cc:69
+20260712 08:57:27.935751Z 1395100 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+稳态测试，持续 20 秒
+Sending EchoRequest at qps=10055 latency=98
+Sending EchoRequest at qps=10340 latency=95
+Sending EchoRequest at qps=10301 latency=96
+Sending EchoRequest at qps=10097 latency=98
+Sending EchoRequest at qps=9651 latency=102
+Sending EchoRequest at qps=10239 latency=96
+Sending EchoRequest at qps=10238 latency=96
+Sending EchoRequest at qps=10713 latency=92
+Sending EchoRequest at qps=10865 latency=91
+Sending EchoRequest at qps=10970 latency=90
+Sending EchoRequest at qps=10367 latency=95
+Sending EchoRequest at qps=9987 latency=99
+Sending EchoRequest at qps=11077 latency=89
+Sending EchoRequest at qps=11886 latency=83
+Sending EchoRequest at qps=12144 latency=81
+Sending EchoRequest at qps=11456 latency=86
+Sending EchoRequest at qps=11089 latency=89
+Sending EchoRequest at qps=10507 latency=94
+Sending EchoRequest at qps=11282 latency=87
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 214123
+成功请求: 214123
+失败请求: 0
+成功率: 100.00%
+测试时长: 20000 ms
+QPS: 10706.15
+
+延迟统计 (微秒):
+  最小值: 58.00 us
+  平均值: 92.70 us
+  P50:    90.00 us
+  P90:    108.00 us
+  P95:    115.00 us
+  P99:    153.00 us
+  P999:   406.00 us
+  最大值: 6824.00 us
+==================================
+
+20260712 08:57:48.245462Z 1395100 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x556D4ECE9F50 - TcpClient.cc:75
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client steady echo 0 0 20 0 127.0.0.1 8889 0 65536
+========== RPC 性能测试（默认 Protobuf）==========
+方法名: echo，payload 大小: 65536 字节（大 payload 对比）
+测试类型: steady
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 08:57:56.292596Z 1395390 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x55C7EBD08F50 - TcpClient.cc:69
+20260712 08:57:56.292624Z 1395390 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+稳态测试，持续 20 秒
+Sending EchoRequest at qps=2836 latency=336
+Sending EchoRequest at qps=2108 latency=455
+Sending EchoRequest at qps=1953 latency=491
+Sending EchoRequest at qps=1982 latency=485
+Sending EchoRequest at qps=2182 latency=441
+Sending EchoRequest at qps=2099 latency=459
+Sending EchoRequest at qps=2104 latency=458
+Sending EchoRequest at qps=2057 latency=467
+Sending EchoRequest at qps=2061 latency=465
+Sending EchoRequest at qps=2005 latency=479
+Sending EchoRequest at qps=2019 latency=475
+Sending EchoRequest at qps=2017 latency=475
+Sending EchoRequest at qps=1820 latency=527
+Sending EchoRequest at qps=1922 latency=498
+Sending EchoRequest at qps=2024 latency=474
+Sending EchoRequest at qps=2016 latency=474
+Sending EchoRequest at qps=1894 latency=507
+Sending EchoRequest at qps=2051 latency=467
+Sending EchoRequest at qps=2057 latency=466
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 41194
+成功请求: 41194
+失败请求: 0
+成功率: 100.00%
+测试时长: 20000 ms
+QPS: 2059.70
+
+延迟统计 (微秒):
+  最小值: 294.00 us
+  平均值: 466.08 us
+  P50:    459.00 us
+  P90:    545.00 us
+  P95:    580.00 us
+  P99:    702.00 us
+  P999:   2631.00 us
+  最大值: 5350.00 us
+==================================
+
+20260712 08:58:16.596566Z 1395390 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x55C7EBD08F50 - TcpClient.cc:75
+
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client multi echo 20000 4 "" "" "" "" 16
+========== RPC 性能测试（默认 Protobuf）==========
+测试类型: multi
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 08:58:20.096622Z 1395627 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x559E80569F50 - TcpClient.cc:69
+20260712 08:58:20.096638Z 1395627 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+多线程测试，线程数: 4, 总请求数: 20000
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 20000
+成功请求: 20000
+失败请求: 0
+成功率: 100.00%
+测试时长: 608 ms
+QPS: 32894.74
+
+延迟统计 (微秒):
+  最小值: 59.00 us
+  平均值: 113.70 us
+  P50:    106.00 us
+  P90:    144.00 us
+  P95:    162.00 us
+  P99:    216.00 us
+  P999:   622.00 us
+  最大值: 41521.00 us
+==================================
+
+20260712 08:58:21.008396Z 1395627 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x559E80569F50 - TcpClient.cc:75
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client multi echo 0 4 20 0 127.0.0.1 8889 0 16
+========== RPC 性能测试（默认 Protobuf）==========
+方法名: echo，payload 大小: 16 字节（大 payload 对比）
+测试类型: multi
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 09:10:02.046297Z 1402640 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x55758B535F50 - TcpClient.cc:69
+20260712 09:10:02.046314Z 1402640 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+多线程测试，线程数: 4, 总请求数: 0
+Sending EchoRequest at qps=32420 latency=122
+Sending EchoRequest at qps=36399 latency=108
+Sending EchoRequest at qps=36577 latency=108
+Sending EchoRequest at qps=40019 latency=98
+Sending EchoRequest at qps=37967 latency=104
+Sending EchoRequest at qps=37713 latency=105
+Sending EchoRequest at qps=35078 latency=113
+Sending EchoRequest at qps=36799 latency=107
+Sending EchoRequest at qps=36441 latency=108
+Sending EchoRequest at qps=36236 latency=109
+Sending EchoRequest at qps=34617 latency=114
+Sending EchoRequest at qps=34695 latency=114
+Sending EchoRequest at qps=34169 latency=116
+Sending EchoRequest at qps=36255 latency=109
+Sending EchoRequest at qps=34203 latency=115
+Sending EchoRequest at qps=32498 latency=122
+Sending EchoRequest at qps=35219 latency=112
+Sending EchoRequest at qps=36164 latency=109
+Sending EchoRequest at qps=36777 latency=108
+Sending EchoRequest at qps=34425 latency=114
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 714672
+成功请求: 714672
+失败请求: 0
+成功率: 100.00%
+测试时长: 20041 ms
+QPS: 35660.50
+
+延迟统计 (微秒):
+  最小值: 58.00 us
+  平均值: 111.10 us
+  P50:    105.00 us
+  P90:    140.00 us
+  P95:    158.00 us
+  P99:    205.00 us
+  P999:   635.00 us
+  最大值: 41064.00 us
+==================================
+
+20260712 09:10:22.429904Z 1402640 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x55758B535F50 - TcpClient.cc:75
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/benchmark_client steady echo 0 0 15 0 127.0.0.1 8889 0 1024
+========== RPC 性能测试（默认 Protobuf）==========
+方法名: echo，payload 大小: 1024 字节（大 payload 对比）
+测试类型: steady
+方法名: echo
+服务器: 127.0.0.1:8889
+使用服务发现: 否
+20260712 09:25:53.909290Z 1407949 INFO  TcpClient::TcpClient[MuduoClient] - connector 0x55799BF23F50 - TcpClient.cc:69
+20260712 09:25:53.909307Z 1407949 INFO  TcpClient::connect[MuduoClient] - connecting to 127.0.0.1:8889 - TcpClient.cc:107
+连接成功，开始性能测试...
+稳态测试，持续 15 秒
+Sending EchoRequest at qps=12224 latency=81
+Sending EchoRequest at qps=13119 latency=75
+Sending EchoRequest at qps=12088 latency=82
+Sending EchoRequest at qps=10702 latency=92
+Sending EchoRequest at qps=11165 latency=88
+Sending EchoRequest at qps=10449 latency=94
+Sending EchoRequest at qps=12290 latency=80
+Sending EchoRequest at qps=11338 latency=87
+Sending EchoRequest at qps=11599 latency=85
+Sending EchoRequest at qps=11288 latency=87
+Sending EchoRequest at qps=11366 latency=87
+Sending EchoRequest at qps=11601 latency=85
+Sending EchoRequest at qps=10997 latency=90
+Sending EchoRequest at qps=11030 latency=89
+
+========== 性能测试结果（Protobuf 序列化）==========
+总请求数: 172272
+成功请求: 172272
+失败请求: 0
+成功率: 100.00%
+测试时长: 15000 ms
+QPS: 11484.80
+
+延迟统计 (微秒):
+  最小值: 55.00 us
+  平均值: 86.37 us
+  P50:    84.00 us
+  P90:    101.00 us
+  P95:    107.00 us
+  P99:    137.00 us
+  P999:   467.00 us
+  最大值: 4101.00 us
+==================================
+
+20260712 09:26:09.218793Z 1407949 INFO  TcpClient::~TcpClient[MuduoClient] - connector 0x55799BF23F50 - TcpClient.cc:75
+
+lcz@iv-yef3xahqtc5i3z5jzmr5:~/dev_version/RPC/rpc/build$ ./bin/shm_benchmark_client single echo 0 0 20 "" 65536
+========== SHM (共享内存) RPC 性能测试 ==========
+测试类型: single  方法: echo  载荷: 16B
+Sending EchoRequest at qps=13760 latency=60
+Sending EchoRequest at qps=14397 latency=58
+Sending EchoRequest at qps=14527 latency=57
+Sending EchoRequest at qps=13992 latency=60
+Sending EchoRequest at qps=14150 latency=58
+Sending EchoRequest at qps=13957 latency=60
+Sending EchoRequest at qps=14315 latency=58
+Sending EchoRequest at qps=14582 latency=56
+Sending EchoRequest at qps=14105 latency=59
+Sending EchoRequest at qps=14616 latency=57
+Sending EchoRequest at qps=14025 latency=59
+Sending EchoRequest at qps=14673 latency=57
+Sending EchoRequest at qps=14086 latency=58
+Sending EchoRequest at qps=14025 latency=59
+Sending EchoRequest at qps=13516 latency=61
+Sending EchoRequest at qps=13216 latency=63
+Sending EchoRequest at qps=13993 latency=59
+Sending EchoRequest at qps=14582 latency=56
+Sending EchoRequest at qps=14561 latency=57
+
+========== SHM RPC 性能测试结果 ==========
+总请求: 282658  成功: 282658  失败: 0  成功率: 100.00%
+耗时: 20501 ms  QPS: 13787.52
+
+延迟 (微秒):
+  Min:  31.00 us
+  P50:  57.00 us
+  P90:  71.00 us
+  P95:  76.00 us
+  P99:  102.00 us
+  P999: 287.00 us
+  Max:  5468.00 us
+==========================================

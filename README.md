@@ -1,4 +1,4 @@
-# LCZ RPC
+# lyqtRpc
 
 [![CI](https://github.com/lczllx/RPC/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lczllx/RPC/actions/workflows/ci.yml)
 
@@ -108,29 +108,40 @@ RPC 从发请求到收响应整条链路是齐的，benchmark 里对比了 JSON 
 
 ---
 
-## 2. 压测
+## 2. 压测（echo 操作，同机对比 brpc）
 
-环境：`4C8G` 云机、`Ubuntu 22.04`、`g++ 11`、`-O3`。
+环境：`4C8G` 云机、`Ubuntu 22.04`、`g++ 12.3.0`、`-O3`，全部使用 Protobuf 序列化。brpc 基于 `multi_threaded_echo` 示例。
 
-### TCP 路径（本机回环）
+### 单线程延迟与吞吐
 
-| 场景 | JSON | Protobuf | 提升 |
+| 载荷 | brpc TCP | 我们的 TCP Proto | 我们的 SHM Proto ZC | SHM 提升 |
+|---|---:|---:|---:|---:|
+| 16B QPS | ~14,000 | 10,706 | **25,216** | +136% |
+| 16B P50 | ~68μs | 90μs | **28μs** | **-69%** |
+| 1KB QPS | ~14,000 | 11,484 | **23,521** | +105% |
+| 1KB P50 | ~68μs | 84μs | **30μs** | **-64%** |
+| 64KB QPS | ~4,300 | 2,059 | **11,552** | +461% |
+| 64KB P50 | ~220μs | 459μs | **68μs** | **-69%** |
+
+> brpc 只输出 avg 延迟，表中为 avg ≈ P50 估算。
+> SHM Proto ZC 路径：per-client ring buffer + muduo EventLoop + Protobuf SerializeToArray 直写。
+
+### 4 线程并发（16B echo）
+
+| 指标 | brpc TCP | 我们的 TCP Proto | 我们的 SHM Proto ZC |
 |---|---:|---:|---:|
-| 小 payload QPS（多线程 add） | 31,546 | 50,125 | +59% |
-| 大 payload QPS（100KB echo） | 702.74 | 1,607.72 | 2.29x |
-| 大 payload P99 | 1.96ms | 0.72ms | 2.72x |
+| QPS | ~48,000 | 35,660 | **123,250** |
+| P50 | ~82μs | 105μs | **17μs** |
 
-### SHM 零拷贝 vs TCP（add 操作，同机对比）
+### 我们的传输路径对比（16B echo，单线程）
 
-| 指标 | TCP Protobuf | SHM Proto ZC | 提升 |
-|---|---:|---:|---:|
-| 单连接 P50 | 86μs | **32μs** | **-63%** |
-| 单连接 QPS | 11,235 | **14,716** | +31% |
-| 吞吐 QPS（10s 持续） | 11,645 | **23,127** | **+99%** |
-| 4 线程 QPS | 37,147 | 29,239 | — |
-| 4 线程 P50 | 97μs | **15μs** | **-85%** |
+| 路径 | 序列化 | QPS | P50 | 传输介质 |
+|---|---:|---:|---:|---|
+| TCP Proto | Protobuf | 10,706 | 90μs | TCP localhost |
+| SHM JSON | JSON | 13,809 | 57μs | 共享内存 |
+| SHM Proto ZC | Protobuf 零拷贝 | **25,216** | **28μs** | 共享内存 |
 
-> SHM 路径基于 per-client ring buffer + muduo EventLoop 线程池，绕过 TCP 协议栈。单连接延迟降至 32μs，吞吐翻倍。多线程 QPS 差距来自 per-connection SHM 创建开销（ftruncate），可通过连接预热消除。
+> 结论：SHM Proto ZC 单线程延迟 28μs，为 brpc TCP 的 41%；吞吐 25k QPS，为 brpc 的 1.8×。TCP 路径与 brpc 差距约 30%，主要来源于 bthread 协程、IOBuf 零拷贝、baidu_std 多路复用等架构选择的差异。
 
 ---
 

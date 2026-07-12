@@ -9,7 +9,7 @@
 std::atomic<bool> running{true};
 
 int main() {
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
     signal(SIGINT,  [](int){ running = false; });
     signal(SIGTERM, [](int){ running = false; });
 

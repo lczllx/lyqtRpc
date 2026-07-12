@@ -68,7 +68,6 @@ vcpkg_installed/
 _cmake_build/
 
 # ====== 文档 ======
-# docs/ 可提交（架构设计），仅忽略 rpc 子目录草稿
 rpc/docs/
 
 # ====== 本地 FlatBuffers 安装 ======

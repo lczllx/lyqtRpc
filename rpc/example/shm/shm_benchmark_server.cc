@@ -18,7 +18,7 @@ int main() {
     signal(SIGTERM, [](int){ running = false; });
 
     // 关闭框架日志，避免干扰 benchmark 输出
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
 
     lcz_rpc::ShmServer server("lcz_shm_bench_notify", "lcz_shm_bench",
                                1 * 1024 * 1024, 1 * 1024 * 1024, 32);

@@ -15,7 +15,7 @@ int main() {
     signal(SIGINT,  [](int){ running = false; });
     signal(SIGTERM, [](int){ running = false; });
 
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
 
     lcz_rpc::ShmServerZc server("lcz_shm_bench_zc_notify", "lcz_shm_bench_zc",
                                  1 * 1024 * 1024, 1 * 1024 * 1024, 32);

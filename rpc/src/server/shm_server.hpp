@@ -40,25 +40,25 @@ public:
           _max_clients(max_clients), _worker_count(worker_threads) {}
 
     void start() override {
-        // 1. bind + listen
+        //std::cerr << "[TRACE] ShmServer::start() entered, path=" << _notify_path << std::endl;
         _listen_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+        //std::cerr << "[TRACE] socket() returned fd=" << _listen_fd << std::endl;
         if (_listen_fd < 0) {
             LCZ_ERROR("[ShmServer] socket failed errno=%d", errno); return;
         }
-        // 设置 accept 超时 500ms，stop() 后 accept 会在超时内返回而不会永远阻塞
-        struct timeval tv = {0, 500000};
-        setsockopt(_listen_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         struct sockaddr_un addr = {};
         addr.sun_family = AF_UNIX;
         strncpy(addr.sun_path, _notify_path.c_str(), sizeof(addr.sun_path) - 1);
         unlink(_notify_path.c_str());
+        //std::cerr << "[TRACE] bind(" << _notify_path << ")" << std::endl;
         if (bind(_listen_fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-            LCZ_ERROR("[ShmServer] bind failed errno=%d", errno);
+            LCZ_ERROR("[ShmServer] bind %s failed errno=%d", _notify_path.c_str(), errno);
             close(_listen_fd); return;
         }
+        //std::cerr << "[TRACE] bind+listen OK, fd=" << _listen_fd << std::endl;
         if (listen(_listen_fd, _max_clients) < 0) {
             LCZ_ERROR("[ShmServer] listen failed errno=%d", errno);
-            close(_listen_fd); return;
+            close(_listen_fd); unlink(_notify_path.c_str()); return;
         }
 
         // 2. 创建 worker（先加入 vector，再启动线程）

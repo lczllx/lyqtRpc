@@ -48,7 +48,8 @@ public:
 };
 
 void proto_worker(const std::string& notify_path, const std::string& method,
-                  const std::string& payload, int num_requests, ProtoStats& stats) {
+                  const std::string& payload, int num_requests, ProtoStats& stats,
+                  int duration_sec = 0) {
     lcz_rpc::ShmClientProto client(notify_path);
     std::mutex mtx; std::condition_variable cv;
     bool got_resp = false; std::string rid;
@@ -61,30 +62,55 @@ void proto_worker(const std::string& notify_path, const std::string& method,
         if (resp->rid() == rid) { got_resp = true; cv.notify_one(); }
     });
     client.connect();
-    if (!client.connected()) { stats.fail_count += num_requests; return; }
+    if (!client.connected()) { stats.fail_count = 1; std::cerr << "[ERROR] 连接失败" << std::endl; return; }
 
     lcz_rpc::proto::AddRequest add_req;
     add_req.set_num1(10); add_req.set_num2(20);
     std::string add_body = add_req.SerializeAsString();
 
-    for (int i = 0; i < num_requests; ++i) {
+    auto report_start = std::chrono::steady_clock::now();
+    auto report_next  = report_start + std::chrono::seconds(1);
+    int  batch_count  = 0;
+    double batch_lat  = 0;
+
+    int total = (duration_sec > 0) ? 99999999 : num_requests;
+    auto deadline = (duration_sec > 0)
+        ? std::chrono::steady_clock::now() + std::chrono::seconds(duration_sec)
+        : std::chrono::steady_clock::time_point::max();
+
+    for (int i = 0; i < total; ++i) {
         auto req = lcz_rpc::MessageFactory::create<lcz_rpc::ProtoRpcRequest>();
         { std::lock_guard<std::mutex> lk(mtx); rid = uuid(); req->setId(rid); got_resp = false; }
         req->setMsgType(lcz_rpc::MsgType::REQ_RPC_PROTO);
         req->setMethod(method);
         req->setBody(method == "add" ? add_body : payload);
 
-        auto start = std::chrono::steady_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
         if (!client.send(req)) { stats.record(-1, false); continue; }
         { std::unique_lock<std::mutex> lk(mtx); cv.wait(lk, [&]{ return got_resp; }); }
-        auto end = std::chrono::steady_clock::now();
-        stats.record(std::chrono::duration_cast<std::chrono::microseconds>(end-start).count(), true);
+        auto t2 = std::chrono::steady_clock::now();
+        double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+        stats.record(lat, true);
+
+        // 每秒统计输出（对齐 brpc 格式）
+        if (duration_sec > 0) {
+            batch_count++;
+            batch_lat += lat;
+            if (t2 >= report_next) {
+                double avg = batch_lat / batch_count;
+                std::cout << "Sending EchoRequest at qps=" << static_cast<int>(batch_count)
+                          << " latency=" << static_cast<int>(avg) << std::endl;
+                batch_count = 0; batch_lat = 0;
+                report_next = t2 + std::chrono::seconds(1);
+            }
+            if (t2 >= deadline) break;
+        }
     }
     client.shutdown();
 }
 
 int main(int argc, char* argv[]) {
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
     std::string test_type = "single", method = "add";
     int requests = 10000, threads = 4, duration = 10, payload_size = 16;
     if (argc > 1) test_type = argv[1];
@@ -105,7 +131,7 @@ int main(int argc, char* argv[]) {
 
     if (test_type == "single") {
         stats.start_time = std::chrono::steady_clock::now();
-        proto_worker("lcz_shm_proto_bench_notify", method, payload, requests, stats);
+        proto_worker("lcz_shm_proto_bench_notify", method, payload, requests, stats, duration);
         stats.end_time = std::chrono::steady_clock::now();
     } else if (test_type == "multi") {
         int per = requests / threads;
@@ -113,7 +139,7 @@ int main(int argc, char* argv[]) {
         std::vector<ProtoStats> tstats(threads);
         stats.start_time = std::chrono::steady_clock::now();
         for (int t=0; t<threads; ++t)
-            ths.emplace_back([&,t](){ proto_worker("lcz_shm_proto_bench_notify",method,payload,per,tstats[t]); });
+            ths.emplace_back([&,t](){ proto_worker("lcz_shm_proto_bench_notify",method,payload,per,tstats[t],duration); });
         for (auto& th: ths) th.join();
         stats.end_time = std::chrono::steady_clock::now();
         for (auto& ts: tstats) stats.merge(ts);

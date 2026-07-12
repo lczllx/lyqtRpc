@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <iomanip>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <string>
 
@@ -125,52 +126,78 @@ void single_thread_test(lcz_rpc::client::RpcClient& client, const std::string& m
 
 // 多线程测试
 void multi_thread_test(lcz_rpc::client::RpcClient& client, const std::string& method,
-                      int total_requests, int thread_count, BenchmarkStats& stats) {
-    int requests_per_thread = total_requests / thread_count;
+                      int total_requests, int thread_count, BenchmarkStats& stats,
+                      int duration_sec = 0) {
+    int requests_per_thread = (duration_sec > 0) ? 99999999 : total_requests / thread_count;
+    auto deadline = (duration_sec > 0)
+        ? std::chrono::steady_clock::now() + std::chrono::seconds(duration_sec)
+        : std::chrono::steady_clock::time_point::max();
     std::vector<std::thread> threads;
     std::vector<BenchmarkStats> thread_stats(thread_count);
-    stats.start_time = std::chrono::steady_clock::now();
+    std::mutex print_mtx;
+    std::atomic<int64_t> total_qps{0};
+    std::atomic<int64_t> total_lat_us{0};
+    auto report_start = std::chrono::steady_clock::now();
 
     auto run_add = [&](int t) {
-        AddRequest req;
-        req.set_num1(10);
-        req.set_num2(20);
+        AddRequest req; req.set_num1(10); req.set_num2(20);
+        int batch = 0; double bl = 0; auto next = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         for (int i = 0; i < requests_per_thread; ++i) {
-            auto start = std::chrono::steady_clock::now();
+            auto t1 = std::chrono::steady_clock::now();
+            if (duration_sec > 0 && t1 >= deadline) break;
             AddResponse resp;
             bool ok = client.call_proto<AddRequest, AddResponse>("add", req, &resp);
-            thread_stats[t].record(std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - start).count(), ok);
+            auto t2 = std::chrono::steady_clock::now();
+            double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+            thread_stats[t].record(lat, ok);
+            if (duration_sec > 0) { total_qps++; total_lat_us += static_cast<int64_t>(lat); }
         }
     };
     auto run_echo = [&](int t) {
-        EchoRequest req;
-        req.set_data(stats.echo_payload);
+        EchoRequest req; req.set_data(stats.echo_payload);
+        int batch = 0; double bl = 0; auto next = std::chrono::steady_clock::now() + std::chrono::seconds(1);
         for (int i = 0; i < requests_per_thread; ++i) {
-            auto start = std::chrono::steady_clock::now();
+            auto t1 = std::chrono::steady_clock::now();
+            if (duration_sec > 0 && t1 >= deadline) break;
             EchoResponse resp;
             bool ok = client.call_proto<EchoRequest, EchoResponse>("echo", req, &resp);
-            thread_stats[t].record(std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - start).count(), ok);
+            auto t2 = std::chrono::steady_clock::now();
+            double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+            thread_stats[t].record(lat, ok);
+            if (duration_sec > 0) { total_qps++; total_lat_us += static_cast<int64_t>(lat); }
         }
     };
     auto run_heavy = [&](int t) {
-        HeavyRequest req;
-        req.set_value(1000);
+        HeavyRequest req; req.set_value(1000);
         for (int i = 0; i < requests_per_thread; ++i) {
-            auto start = std::chrono::steady_clock::now();
+            auto t1 = std::chrono::steady_clock::now();
+            if (duration_sec > 0 && t1 >= deadline) break;
             HeavyResponse resp;
             bool ok = client.call_proto<HeavyRequest, HeavyResponse>("heavy_compute", req, &resp);
-            thread_stats[t].record(std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - start).count(), ok);
+            auto t2 = std::chrono::steady_clock::now();
+            thread_stats[t].record(std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count(), ok);
         }
     };
 
+    stats.start_time = std::chrono::steady_clock::now();
     for (int t = 0; t < thread_count; ++t) {
         if (method == "add") threads.emplace_back(run_add, t);
         else if (method == "echo") threads.emplace_back(run_echo, t);
         else threads.emplace_back(run_heavy, t);
     }
+
+    // 每秒打印聚合 QPS（仅 duration 模式）
+    if (duration_sec > 0) {
+        while (std::chrono::steady_clock::now() < deadline) {
+            sleep(1);
+            int64_t qps = total_qps.exchange(0);
+            int64_t lat_sum = total_lat_us.exchange(0);
+            int avg_lat = qps > 0 ? static_cast<int>(lat_sum / qps) : 0;
+            std::cout << "Sending EchoRequest at qps=" << qps
+                      << " latency=" << avg_lat << std::endl;
+        }
+    }
+
     for (auto& th : threads) th.join();
     stats.end_time = std::chrono::steady_clock::now();
     for (auto& ts : thread_stats) {
@@ -240,11 +267,11 @@ int main(int argc, char* argv[])
     if (argc > 3) requests = std::atoi(argv[3]);
     if (argc > 4) threads = std::atoi(argv[4]);
     if (argc > 5) duration = std::atoi(argv[5]);
-    if (argc > 6) use_discover = std::atoi(argv[6]) != 0;
-    if (argc > 7) server_ip = argv[7];
-    if (argc > 8) server_port = std::atoi(argv[8]);
-    if (argc > 9) registry_port = std::atoi(argv[9]);
-    if (argc > 10) payload_size = std::atoi(argv[10]);
+    if (argc > 6 && strlen(argv[6]) > 0) use_discover = std::atoi(argv[6]) != 0;
+    if (argc > 7 && strlen(argv[7]) > 0) server_ip = argv[7];
+    if (argc > 8 && strlen(argv[8]) > 0) server_port = std::atoi(argv[8]);
+    if (argc > 9 && strlen(argv[9]) > 0) registry_port = std::atoi(argv[9]);
+    if (argc > 10 && strlen(argv[10]) > 0) payload_size = std::atoi(argv[10]);
 
     BenchmarkStats stats;
     if (method == "echo" && payload_size > 0)
@@ -276,15 +303,58 @@ int main(int argc, char* argv[])
     if (test_type == "single") {
         std::cout << "单线程测试，请求数: " << requests << std::endl;
         single_thread_test(client, method, requests, stats);
+    } else if (test_type == "steady") {
+        // 稳态测试：跑 duration 秒，每秒输出一行（对齐 brpc 格式）
+        std::cout << "稳态测试，持续 " << duration << " 秒" << std::endl;
+        int batch_count = 0; double batch_lat = 0;
+        auto report_next = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        auto deadline    = report_next + std::chrono::seconds(duration - 1);
+        stats.start_time = std::chrono::steady_clock::now();
+        if (method == "echo") {
+            EchoRequest req; req.set_data(stats.echo_payload);
+            while (std::chrono::steady_clock::now() < deadline) {
+                auto t1 = std::chrono::steady_clock::now();
+                EchoResponse resp;
+                bool ok = client.call_proto<EchoRequest, EchoResponse>("echo", req, &resp);
+                auto t2 = std::chrono::steady_clock::now();
+                double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+                stats.record(lat, ok);
+                batch_count++; batch_lat += lat;
+                if (t2 >= report_next) {
+                    std::cout << "Sending EchoRequest at qps=" << batch_count
+                              << " latency=" << static_cast<int>(batch_lat/batch_count) << std::endl;
+                    batch_count = 0; batch_lat = 0;
+                    report_next = t2 + std::chrono::seconds(1);
+                }
+            }
+        } else {
+            AddRequest req; req.set_num1(10); req.set_num2(20);
+            while (std::chrono::steady_clock::now() < deadline) {
+                auto t1 = std::chrono::steady_clock::now();
+                AddResponse resp;
+                bool ok = client.call_proto<AddRequest, AddResponse>("add", req, &resp);
+                auto t2 = std::chrono::steady_clock::now();
+                double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+                stats.record(lat, ok);
+                batch_count++; batch_lat += lat;
+                if (t2 >= report_next) {
+                    std::cout << "Sending EchoRequest at qps=" << batch_count
+                              << " latency=" << static_cast<int>(batch_lat/batch_count) << std::endl;
+                    batch_count = 0; batch_lat = 0;
+                    report_next = t2 + std::chrono::seconds(1);
+                }
+            }
+        }
+        stats.end_time = std::chrono::steady_clock::now();
     } else if (test_type == "multi") {
         std::cout << "多线程测试，线程数: " << threads << ", 总请求数: " << requests << std::endl;
-        multi_thread_test(client, method, requests, threads, stats);
+        multi_thread_test(client, method, requests, threads, stats, duration);
     } else if (test_type == "throughput") {
         std::cout << "吞吐量测试，持续时间: " << duration << " 秒" << std::endl;
         throughput_test(client, method, duration, stats);
     } else {
         std::cerr << "未知的测试类型: " << test_type << std::endl;
-        std::cerr << "支持的类型: single, multi, throughput" << std::endl;
+        std::cerr << "支持的类型: single, multi, throughput, steady" << std::endl;
         return -1;
     }
 

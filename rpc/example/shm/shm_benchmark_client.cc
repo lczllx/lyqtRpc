@@ -63,7 +63,8 @@ public:
 
 // 每个线程独立 ShmClient，无锁，真并发
 void thread_worker(const std::string& notify_path, const std::string& method,
-                   const Json::Value& params, int num_requests, BenchmarkStats& stats) {
+                   const Json::Value& params, int num_requests, BenchmarkStats& stats,
+                   int duration_sec = 0) {
     lcz_rpc::ShmClient client(notify_path);
 
     std::mutex mtx;
@@ -80,9 +81,17 @@ void thread_worker(const std::string& notify_path, const std::string& method,
     });
 
     client.connect();
-    if (!client.connected()) { stats.fail_count += num_requests; return; }
+    if (!client.connected()) { stats.fail_count = 1; std::cerr << "[ERROR] 连接失败" << std::endl; return; }
 
-    for (int i = 0; i < num_requests; ++i) {
+    int total = (duration_sec > 0) ? 99999999 : num_requests;
+    auto deadline = (duration_sec > 0)
+        ? std::chrono::steady_clock::now() + std::chrono::seconds(duration_sec)
+        : std::chrono::steady_clock::time_point::max();
+
+    int batch_count = 0; double batch_lat = 0;
+    auto report_next = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+
+    for (int i = 0; i < total; ++i) {
         auto req = lcz_rpc::MessageFactory::create<lcz_rpc::RpcRequest>();
         {
             std::lock_guard<std::mutex> lk(mtx);
@@ -94,22 +103,33 @@ void thread_worker(const std::string& notify_path, const std::string& method,
         req->setMethod(method);
         req->setParams(params);
 
-        auto start = std::chrono::steady_clock::now();
+        auto t1 = std::chrono::steady_clock::now();
         if (!client.send(req)) { stats.record(-1, false); continue; }
 
         {
             std::unique_lock<std::mutex> lk(mtx);
             cv.wait(lk, [&]{ return got_resp; });
         }
-        auto end = std::chrono::steady_clock::now();
-        stats.record(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count(), true);
+        auto t2 = std::chrono::steady_clock::now();
+        double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2-t1).count();
+        stats.record(lat, true);
+        if (duration_sec > 0) {
+            batch_count++; batch_lat += lat;
+            if (t2 >= report_next) {
+                std::cout << "Sending EchoRequest at qps=" << batch_count
+                          << " latency=" << static_cast<int>(batch_lat/batch_count) << std::endl;
+                batch_count = 0; batch_lat = 0;
+                report_next = t2 + std::chrono::seconds(1);
+            }
+            if (t2 >= deadline) break;
+        }
     }
 
     client.shutdown();
 }
 
 int main(int argc, char* argv[]) {
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
 
     std::string test_type = "single";
     std::string method    = "add";
@@ -117,13 +137,13 @@ int main(int argc, char* argv[]) {
     int threads           = 4;
     int duration          = 10;
 
-    if (argc > 1) test_type = argv[1];
-    if (argc > 2) method    = argv[2];
-    if (argc > 3) requests  = std::atoi(argv[3]);
-    if (argc > 4) threads   = std::atoi(argv[4]);
-    int    payload_size = 16;       // echo 载荷大小(B)，默认 16
-    if (argc > 5) duration     = std::atoi(argv[5]);
-    if (argc > 6) payload_size = std::atoi(argv[6]);
+    if (argc > 1 && strlen(argv[1]) > 0) test_type = argv[1];
+    if (argc > 2 && strlen(argv[2]) > 0) method    = argv[2];
+    if (argc > 3 && strlen(argv[3]) > 0) requests  = std::atoi(argv[3]);
+    if (argc > 4 && strlen(argv[4]) > 0) threads   = std::atoi(argv[4]);
+    int    payload_size = 16;
+    if (argc > 5 && strlen(argv[5]) > 0) duration     = std::atoi(argv[5]);
+    if (argc > 6 && strlen(argv[6]) > 0) payload_size = std::atoi(argv[6]);
 
     Json::Value params;
     if (method == "add") { params["num1"] = 10; params["num2"] = 20; }
@@ -138,7 +158,7 @@ int main(int argc, char* argv[]) {
 
     if (test_type == "single") {
         stats.start_time = std::chrono::steady_clock::now();
-        thread_worker("lcz_shm_bench_notify", method, params, requests, stats);
+        thread_worker("lcz_shm_bench_notify", method, params, requests, stats, duration);
         stats.end_time = std::chrono::steady_clock::now();
     }
     else if (test_type == "multi") {
@@ -149,7 +169,7 @@ int main(int argc, char* argv[]) {
         stats.start_time = std::chrono::steady_clock::now();
         for (int t = 0; t < threads; ++t) {
             ths.emplace_back([&, t]() {
-                thread_worker("lcz_shm_bench_notify", method, params, per_thread, thread_stats[t]);
+                thread_worker("lcz_shm_bench_notify", method, params, per_thread, thread_stats[t], duration);
             });
         }
         for (auto& th : ths) th.join();

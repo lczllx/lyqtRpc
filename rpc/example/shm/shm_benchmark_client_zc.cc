@@ -81,7 +81,7 @@ void zc_thread_worker(const std::string& notify_path, const std::string& method,
 }
 
 int main(int argc, char* argv[]) {
-    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::FATAL);
+    lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
     std::string test_type = "single", method = "add";
     int requests = 10000, threads = 4, duration = 10;
     if (argc > 1) test_type = argv[1];
