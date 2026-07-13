@@ -92,18 +92,28 @@ namespace lcz_rpc
         int resp_notify_fd() const { return _resp_notify_fd; } // Server→Client
 
         // 外部设置 eventfd（多客户端 handshake 由外部传入）
-        void set_req_notify_fd(int fd)  { _req_notify_fd = fd; }
+        void set_req_notify_fd(int fd) { _req_notify_fd = fd; }
         void set_resp_notify_fd(int fd) { _resp_notify_fd = fd; }
 
         // 写完数据后通知对端（Producer 调）
-        void notify_req()  { uint64_t one=1; if(_req_notify_fd>=0) ::write(_req_notify_fd,&one,8); }
-        void notify_resp() { uint64_t one=1; if(_resp_notify_fd>=0) ::write(_resp_notify_fd,&one,8); }
+        void notify_req()
+        {
+            uint64_t one = 1;
+            if (_req_notify_fd >= 0)
+                ::write(_req_notify_fd, &one, 8);
+        }
+        void notify_resp()
+        {
+            uint64_t one = 1;
+            if (_resp_notify_fd >= 0)
+                ::write(_resp_notify_fd, &one, 8);
+        }
 
         // ====== 缓冲指针（FlatBuffers 零拷贝写入用） ======
-        char *req_write_ptr(size_t &contig_avail);  // 请求 buffer 可写区起始 + 连续可用
-        char *resp_write_ptr(size_t &contig_avail); // 响应 buffer 可写区起始 + 连续可用
-        void req_commit(size_t body_len, MsgType type);   // 写完提交游标 + write(notify_fd)
-        void resp_commit(size_t body_len, MsgType type);  // 同上，响应方向
+        char *req_write_ptr(size_t &contig_avail);       // 请求 buffer 可写区起始 + 连续可用
+        char *resp_write_ptr(size_t &contig_avail);      // 响应 buffer 可写区起始 + 连续可用
+        void req_commit(size_t body_len, MsgType type);  // 写完提交游标 + write(notify_fd)
+        void resp_commit(size_t body_len, MsgType type); // 同上，响应方向
 
         // ====== 生命周期 ======
         ~ShmChannel();
@@ -118,11 +128,11 @@ namespace lcz_rpc
         bool read_from(ShmRingBuf &ch, char *data_base,
                        std::string &body, MsgType &type);
 
-        int _shm_fd = -1; // shm_open 返回
-        void *_addr = nullptr; // mmap 返回的虚拟地址
+        int _shm_fd = -1;            // shm_open 返回
+        void *_addr = nullptr;       // mmap 返回的虚拟地址
         ShmControl *_ctrl = nullptr; // = _addr（两个指针指向同一块内存的开头）
-        char *_req_data = nullptr;// = _addr + 4096
-        char *_resp_data = nullptr;// = _addr + 4096 + req_buf_size
+        char *_req_data = nullptr;   // = _addr + 4096
+        char *_resp_data = nullptr;  // = _addr + 4096 + req_buf_size
         size_t _total_size;
         std::string _name;
         int _req_notify_fd = -1;
