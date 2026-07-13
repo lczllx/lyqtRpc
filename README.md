@@ -1,10 +1,10 @@
 # lyqtRpc
 
-[![CI](https://github.com/lczllx/RPC/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lczllx/RPC/actions/workflows/ci.yml)
+[![CI](https://github.com/lczllx/lyqtRpc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lczllx/lyqtRpc/actions/workflows/ci.yml)
 
 作者：lczllx  
 邮箱：2181719471@qq.com  
-GitHub：https://github.com/lczllx/RPC  
+GitHub：https://github.com/lczllx/lyqtRpc  
 开发环境：Ubuntu，VS Code  
 编译器：g++  
 语言：C++17 
@@ -28,7 +28,7 @@ GitHub：https://github.com/lczllx/RPC
 子模块必须先拉取：
 
 ```bash
-git clone https://github.com/lczllx/RPC.git
+git clone https://github.com/lczllx/lyqtRpc.git
 cd RPC
 git submodule update --init --recursive
 ```
