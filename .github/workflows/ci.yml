@@ -13,6 +13,7 @@
 #   3. 在 rpc/build 全量编译：examples（含 SHM Proto ZC）+ 单元测试
 #   4. 运行 lcz_rpc_unit_tests
 #   5. SHM 零拷贝路径 smoke test
+#   6. Prometheus /metrics smoke test（起 benchmark_server → curl 指标 → 校验关键序列）
 # =============================================================================
 
 name: CI
@@ -137,6 +138,41 @@ jobs:
           else
             echo "::warning ::SHM smoke test failed (return=$RET)，不影响 CI 通过"
           fi
+
+      # Prometheus /metrics 端到端 smoke test：
+      # 起 benchmark_server（直连模式，不依赖 etcd）→ 打一发请求 → curl 指标 →
+      # 校验 关键序列存在 + 错误计数预注册为 0 + 大数无科学计数法
+      - name: Prometheus /metrics smoke test
+        working-directory: rpc/build
+        run: |
+          ./bin/benchmark_server 18889 0 8080 0 19090 &
+          SRV_PID=$!
+          # 轮询等 /metrics 端点就绪（最多 10s）
+          for i in $(seq 1 20); do
+            curl -sf -o /dev/null http://localhost:19090/metrics && break
+            sleep 0.5
+          done
+          # 打一发真实请求，让 rpc_requests_total 动起来
+          timeout 30 ./bin/benchmark_client single echo 100 1 1 "" 127.0.0.1 18889 || true
+          curl -s http://localhost:19090/metrics | tee /tmp/metrics_smoke.txt
+          kill $SRV_PID 2>/dev/null || true
+          wait $SRV_PID 2>/dev/null || true
+          FAIL=0
+          for pat in \
+            'rpc_requests_total{method="echo"} 100' \
+            'rpc_errors_total{method="echo"} 0' \
+            'rpc_request_duration_us_bucket{method="echo",le="+Inf"} 100' \
+            'process_resident_memory_bytes' \
+            'process_open_fds' \
+            '# TYPE process_cpu_seconds_total counter'; do
+            grep -qF "$pat" /tmp/metrics_smoke.txt || { echo "::error ::缺少指标: $pat"; FAIL=1; }
+          done
+          # 回归：大数不得退化为科学计数法（6 位精度截断 bug）
+          if grep -E 'process_(resident|virtual)_memory_bytes [0-9.]+e\+' /tmp/metrics_smoke.txt; then
+            echo "::error ::内存指标出现科学计数法，精度修复回归"
+            FAIL=1
+          fi
+          exit $FAIL
 
   # 验证仓库根 Dockerfile 能构建（与上面并行，不推镜像到仓库）
   docker-image:
