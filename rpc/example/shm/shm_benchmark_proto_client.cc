@@ -118,7 +118,7 @@ int main(int argc, char* argv[]) {
     if (argc > 3) requests  = std::atoi(argv[3]);
     if (argc > 4) threads   = std::atoi(argv[4]);
     if (argc > 5) duration  = std::atoi(argv[5]);
-    if (argc > 6) payload_size = std::atoi(argv[6]);
+    if (argc > 6 && strlen(argv[6]) > 0) payload_size = std::atoi(argv[6]);
 
     std::string payload = std::string(payload_size, 'x');
 
