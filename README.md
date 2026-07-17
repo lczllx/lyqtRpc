@@ -14,6 +14,7 @@
 - **序列化可插拔**：`ISerializer` 抽象接口，默认 Protobuf，支持 JSON 调试、FlatBuffers 零拷贝读
 - **分布式追踪**：`trace_id` + `span_id` 全链路透传
 - **多客户端并发**：SHM 路径服务端 muduo `EventLoopThread` 线程池，per-client 独立 ring buffer
+- **可观测性**：内建 Prometheus `/metrics` 端点（文本协议 0.0.4），暴露请求量/延迟直方图/并发度/错误数/连接数/熔断状态/令牌桶余量/进程级指标，覆盖 brpc `/vars` 核心项
 
 ## 性能：lyqtRpc vs brpc
 
@@ -68,6 +69,19 @@ cd rpc/build
 # 全路径压测
 cd example/shm && bash run_shm_benchmark.sh all
 ```
+
+### 查看 Prometheus 指标
+
+```bash
+# 压测服务端自带 /metrics 端点（默认 9090，第 5 个参数可改）
+cd rpc/build
+./bin/benchmark_server 8889 0 8080 0 &
+./bin/benchmark_client single echo 2000 1 1
+curl localhost:9090/metrics    # 请求量/延迟直方图/错误数/连接数/process_*
+```
+
+接入 Prometheus 只需在 `prometheus.yml` 的 `scrape_configs` 里加上该地址；
+P99 等分位数用查询侧计算：`histogram_quantile(0.99, rate(rpc_request_duration_us_bucket[1m]))`。
 
 ## 架构
 

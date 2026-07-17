@@ -242,3 +242,13 @@ Provider 端 `TokenBucket` 固定速率生成令牌。超限返回 `BACKOFF` + `
 ### Topic 发布订阅
 
 支持 `BROADCAST` / `ROUND_ROBIN` / `FANOUT` / `SOURCE_HASH` / `PRIORITY` / `REDUNDANT` 六种转发策略，与 RPC 共用底层消息和网络。
+
+### 可观测性（Prometheus /metrics）
+
+内建 Prometheus 文本协议（0.0.4）端点，对标 brpc `/vars` 核心项。设计为"业务线程内联埋点 + 独立线程按需导出"：
+
+- **埋点**：Counter/Gauge/Histogram 全部基于 `std::atomic`（relaxed），业务线程处理请求时就地 `+1`，无采集线程、无队列；Registry 单例懒注册，首次使用自动创建序列
+- **导出**：`MetricsServer` 单线程（muduo EventLoop + Channel）监听 `:9090`，scrape 时读取原子快照拼文本返回；`process_*` 进程级指标（CPU/RSS/fd/线程数/负载）在 scrape 时现读 `/proc`，无人拉取零开销
+- **指标覆盖**：服务端 `rpc_requests_total`/`rpc_request_duration_us`（直方图）/`rpc_concurrency`/`rpc_errors_total`/`rpc_connection_count`，客户端 `rpc_client_*`（RTT/并发/错误），治理组件 `circuit_breaker_state`/`token_bucket_available`/`rpc_rate_limited_total`/`registry_heartbeats_total`
+- **分位数策略**：进程内只存直方图原始桶，P99 由查询侧 `histogram_quantile()` 计算（与官方 client 库一致；brpc 为进程内滑动窗口计算，是两种取舍）
+- **约定细节**：错误计数启动即预注册为 0（区分"零错误"与"序列不存在"）；`_total` 后缀的单调 Gauge 导出 TYPE 修正为 counter；导出 15 位精度避免大数退化为科学计数法

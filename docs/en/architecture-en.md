@@ -200,3 +200,13 @@ Double-buffered async logger with background `AsyncLooper` thread. Five levels (
 ### Pub/Sub Topics
 
 Six forwarding strategies: `BROADCAST`, `ROUND_ROBIN`, `FANOUT`, `SOURCE_HASH`, `PRIORITY`, `REDUNDANT`. Shares the underlying messaging and network layer with RPC.
+
+### Observability (Prometheus /metrics)
+
+Built-in Prometheus text-format (0.0.4) endpoint covering the core of brpc's `/vars`. The design is "inline instrumentation in business threads + on-demand export in a dedicated thread":
+
+- **Instrumentation**: Counter/Gauge/Histogram are `std::atomic`-based (relaxed). Business threads bump values in place while handling requests — no collector thread, no queue. The Registry singleton lazily creates series on first use.
+- **Export**: a single `MetricsServer` thread (muduo EventLoop + Channel) listens on `:9090`; on scrape it reads atomic snapshots and renders text. `process_*` metrics (CPU/RSS/fds/threads/loadavg) are read from `/proc` at scrape time — zero cost when nobody scrapes.
+- **Coverage**: server-side `rpc_requests_total` / `rpc_request_duration_us` (histogram) / `rpc_concurrency` / `rpc_errors_total` / `rpc_connection_count`; client-side `rpc_client_*` (RTT/concurrency/errors); governance `circuit_breaker_state` / `token_bucket_available` / `rpc_rate_limited_total` / `registry_heartbeats_total`.
+- **Percentile strategy**: the process only stores raw histogram buckets; P99 is computed query-side via `histogram_quantile()` (same as official client libraries; brpc computes sliding-window percentiles in-process — a different trade-off).
+- **Convention details**: error counters are pre-registered at 0 on startup (distinguishing "zero errors" from "series absent"); monotonic gauges with a `_total` suffix export TYPE counter; 15-digit precision prevents large values degrading into scientific notation.
