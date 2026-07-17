@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include "../general/publicconfig.hpp"
 #include "../general/log_system/lcz_log.h"
+#include "../general/metrics_hooks.hpp"
 #include "../server/memory_circuit_store.hpp"
 #include "../server/etcd_circuit_store.hpp"
 
@@ -272,7 +273,7 @@ namespace lcz_rpc
                 }
                 return _caller->call(client->connection(), method_name, params, cb);
             }
-            // 纯 Proto RPC 调用（默认序列化方式为 protobuf 时使用）
+            // 纯 Proto RPC 调用（含 Prometheus 客户端指标）
             template<typename Req, typename Resp>
             bool call_proto(const std::string &method_name, const Req &req, Resp *resp,
                            std::chrono::milliseconds timeout = std::chrono::seconds(5))
@@ -283,7 +284,18 @@ namespace lcz_rpc
                     LCZ_ERROR("服务获取失败：%s", method_name.c_str());
                     return false;
                 }
-                return _caller->call_proto(client->connection(), method_name, req, resp, timeout);
+                // ---- Prometheus 客户端指标埋点 ----
+                // onClientSend: rpc_client_requests_total +1、in-flight 并发 +1
+                // onClientRecv: RTT 入直方图、并发 -1、失败时错误计数 +1
+                // 这里测到的是"端到端 RTT"（含网络+服务端处理），
+                // 与服务端 rpc_request_duration_us（仅 handler 耗时）互补
+                auto t1 = std::chrono::steady_clock::now();
+                lcz_rpc::metrics::MetricHooks::onClientSend(method_name);
+                bool ok = _caller->call_proto(client->connection(), method_name, req, resp, timeout);
+                auto t2 = std::chrono::steady_clock::now();
+                double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+                lcz_rpc::metrics::MetricHooks::onClientRecv(method_name, lat, ok);
+                return ok;
             }
 
         private:

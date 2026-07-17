@@ -26,6 +26,7 @@ namespace lcz_rpc
 
             // 没有找到，新建 NodeBreaker 并从 store 恢复状态
             auto node = std::make_shared<NodeBreaker>(_cfg);
+            node->setIdentity(method, host);  // Prometheus 标签用
             CircuitStatus saved = _store->load(method, host);
             if (saved.state == CircuitState::OPEN)
             {

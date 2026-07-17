@@ -3,6 +3,7 @@
 #include <ctime>
 #include "node_breaker.hpp"
 #include "../general/log_system/lcz_log.h"
+#include "../general/metrics_hooks.hpp"
 
 namespace lcz_rpc
 {
@@ -22,6 +23,7 @@ namespace lcz_rpc
                 {
                     _status.state = CircuitState::HALF_OPEN;
                     _status.half_open++;
+                    lcz_rpc::metrics::MetricHooks::onCircuitState(_method, _host, 2);  // HALF_OPEN
                     LCZ_INFO("[NodeBreaker] OPEN => HALF_OPEN (elapsed=%llds >= %ds), 放行探测请求",
                              static_cast<long long>(
                                  std::chrono::duration_cast<std::chrono::seconds>(elapsed).count()),
@@ -55,6 +57,7 @@ namespace lcz_rpc
             {
                 LCZ_INFO("[NodeBreaker] HALF_OPEN/OPEN => CLOSED, 熔断器恢复");
                 _status.state = CircuitState::CLOSED;
+                lcz_rpc::metrics::MetricHooks::onCircuitState(_method, _host, 0);  // CLOSED
                 return true;
             }
             else
@@ -72,6 +75,7 @@ namespace lcz_rpc
                 {
                     _status.state = CircuitState::OPEN;
                     _opened_since = std::chrono::steady_clock::now();
+                    lcz_rpc::metrics::MetricHooks::onCircuitState(_method, _host, 1);  // OPEN
                     _status.opened_at = static_cast<int64_t>(std::time(nullptr));
                     LCZ_INFO("[NodeBreaker] CLOSED => OPEN, 连续失败%d次达到阈值%d",
                              _status.failures, _cfg.failure_threshold);
@@ -90,6 +94,7 @@ namespace lcz_rpc
                 _status.opened_at = static_cast<int64_t>(std::time(nullptr));
                 _status.state = CircuitState::OPEN;
                 _opened_since = std::chrono::steady_clock::now(); // 重设定时器
+                lcz_rpc::metrics::MetricHooks::onCircuitState(_method, _host, 1);  // OPEN
                 LCZ_INFO("[NodeBreaker] HALF_OPEN => OPEN, 探测请求失败");
                 return true;
             }

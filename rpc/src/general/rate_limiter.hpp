@@ -2,6 +2,7 @@
 #include <chrono>
 #include <atomic>
 #include <mutex>
+#include "metrics_hooks.hpp"
 
 namespace lcz_rpc
 {
@@ -20,21 +21,21 @@ namespace lcz_rpc
         bool allow()
         {
             double now_sec = nowSeconds();
+            bool ok = false;
+            double snapshot = 0.0; // 锁内快照，避免锁外读 _tokens 的数据竞争
             {
                 std::lock_guard<std::mutex> lock(_mutex);
-                // 按时间差补充令牌
                 double elapsed = now_sec - _last_refill;
                 _tokens += elapsed * _rate;
-                if (_tokens > _burst)
-                    _tokens = _burst;
+                if (_tokens > _burst) _tokens = _burst;
                 _last_refill = now_sec;
-                if (_tokens >= 1.0)
-                {
-                    _tokens -= 1.0;
-                    return true;
-                }
+                if (_tokens >= 1.0) { _tokens -= 1.0; ok = true; }
+                snapshot = _tokens;
             }
-            return false;
+            lcz_rpc::metrics::MetricHooks::onTokenBucket("default", snapshot);
+            if (!ok)
+                lcz_rpc::metrics::MetricHooks::onRateLimited("default");
+            return ok;
         }
 
         // 返回建议的退避等待时间（毫秒），当前令牌耗尽时用

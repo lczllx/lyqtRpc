@@ -33,12 +33,15 @@ namespace lcz_rpc
             // 构造时传入配置，可选初始状态用于 etcd 恢复
             explicit NodeBreaker(const CircuitConfig &cfg) : _cfg(cfg) {}
             void loadStatus(const CircuitStatus &s) { _status = s; }
-       
+            void setIdentity(const std::string& method, const std::string& host)
+                { _method = method; _host = host; }
+
         private:
             std::mutex _mutex;
             CircuitConfig _cfg;                                  // 当前熔断器的限制参数
             CircuitStatus _status;                               // 当前熔断器状态
             std::chrono::steady_clock::time_point _opened_since; // 进入 OPEN 的时刻（运行时用，重启即丢）
+            std::string _method, _host;                          // 用于 Prometheus 标签
         };
 
     }

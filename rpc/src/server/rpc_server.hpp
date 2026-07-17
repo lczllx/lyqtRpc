@@ -65,9 +65,9 @@ namespace lcz_rpc
             // 优雅退出
             void stop()
             {
-                _hb_loop_ptr->quit();           // 停止心跳扫描事件循环
-                _leader_elector->stop();        // 释放选举租约
-                _server->stop();                // 停止监听
+                _hb_loop_ptr->quit();    // 停止心跳扫描事件循环
+                _leader_elector->stop(); // 释放选举租约
+                _server->stop();         // 停止监听
             }
 
         private:
@@ -144,6 +144,14 @@ namespace lcz_rpc
                 // 设置消息处理回调
                 auto msg_cb = std::bind(&lcz_rpc::Dispacher::onMessage, _dispacher.get(), std::placeholders::_1, std::placeholders::_2);
                 _server->setMessageCallback(msg_cb);
+                // ---- Prometheus: rpc_connection_count 连接数指标 ----
+                // MuduoServer::onConnection 在连接建立/断开时会调用这两个回调
+                // （BaseServer 预留的槽位，RpcServer 此前未使用），
+                // 回调体只做一次原子加减，跑在 muduo IO 线程里，开销纳秒级
+                _server->setConnectionCallback([](const BaseConnection::ptr &)
+                                               { metrics::MetricHooks::onConnectionOpen(); });
+                _server->setCloseCallback([](const BaseConnection::ptr &)
+                                          { metrics::MetricHooks::onConnectionClose(); });
 
                 // RpcServer 仅维持 Provider 心跳与负载上报
             }
@@ -223,10 +231,10 @@ namespace lcz_rpc
             void stop()
             {
                 if (_enablediscover && _report_loop_ptr)
-                    _report_loop_ptr->quit();   // 停止心跳+负载上报的事件循环
-                _server->stop();                // 唤醒 muduo 事件循环使其从 start() 返回
+                    _report_loop_ptr->quit(); // 停止心跳+负载上报的事件循环
+                _server->stop();              // 唤醒 muduo 事件循环使其从 start() 返回
                 if (_server_thread.joinable())
-                    _server_thread.join();      // 等待后台线程退出
+                    _server_thread.join(); // 等待后台线程退出
             }
 
             // 非阻塞启动：在后台线程运行 muduo 事件循环，主线程可继续调用 registerMethod/registerProtoHandler
@@ -307,8 +315,12 @@ namespace lcz_rpc
                 // 遍历已注册的方法，发送心跳给注册中心
                 for (const auto &method : methods)
                 {
-                    // 发送心跳给注册中心
-                    if (!_client_registry->heartbeatProvider(method, _access_addr))
+                    // 发送心跳给注册中心，成功/失败都记入 Prometheus:
+                    // registry_heartbeats_total 总数 +1，失败额外记 registry_heartbeat_errors_total
+                    // （心跳持续失败通常意味着注册中心不可达或 etcd lease 失效）
+                    bool ok = _client_registry->heartbeatProvider(method, _access_addr);
+                    metrics::MetricHooks::onRegistryHeartbeat(method, ok);
+                    if (!ok)
                     {
                         LCZ_WARN("[RpcServer-Provider心跳失败] method=%s", method.c_str());
                     }
