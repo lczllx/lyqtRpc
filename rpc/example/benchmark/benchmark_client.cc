@@ -1,5 +1,6 @@
 #include "../../src/client/rpc_client.hpp"
 #include "../../src/general/message.hpp"
+#include "../../src/general/metrics_server.hpp"
 #include "rpc_envelope.pb.h"
 #include <chrono>
 #include <thread>
@@ -261,6 +262,7 @@ int main(int argc, char* argv[])
     int server_port = 8889;
     int registry_port = 8080;
     int payload_size = 0;  // echo 时若 >0 则使用该字节数的大 payload，用于对比 JSON/Proto
+    int metrics_port = 0;  // >0 则在该端口暴露客户端 /metrics（rpc_client_* 指标）
 
     if (argc > 1) test_type = argv[1];
     if (argc > 2) method = argv[2];
@@ -272,6 +274,13 @@ int main(int argc, char* argv[])
     if (argc > 8 && strlen(argv[8]) > 0) server_port = std::atoi(argv[8]);
     if (argc > 9 && strlen(argv[9]) > 0) registry_port = std::atoi(argv[9]);
     if (argc > 10 && strlen(argv[10]) > 0) payload_size = std::atoi(argv[10]);
+    if (argc > 11 && strlen(argv[11]) > 0) metrics_port = std::atoi(argv[11]);
+
+    if (metrics_port > 0) {
+        lcz_rpc::metrics::MetricHooks::onServerStart(0);  // uptime 起点
+        lcz_rpc::metrics::MetricsServer::start(metrics_port);
+        std::cout << "客户端 Prometheus /metrics → http://localhost:" << metrics_port << "/metrics" << std::endl;
+    }
 
     BenchmarkStats stats;
     if (method == "echo" && payload_size > 0)
@@ -359,5 +368,7 @@ int main(int argc, char* argv[])
     }
 
     stats.print();
+    if (metrics_port > 0)
+        lcz_rpc::metrics::MetricsServer::stop();  // join 静态线程，否则析构时 std::terminate
     return 0;
 }

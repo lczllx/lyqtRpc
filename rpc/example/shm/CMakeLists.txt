@@ -23,6 +23,10 @@ add_executable(shm_proto_client shm_proto_client.cc)
 target_link_libraries(shm_proto_client PRIVATE lcz_rpc)
 set_target_properties(shm_proto_client PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+add_executable(metrics_proto_server metrics_proto_server.cc)
+target_link_libraries(metrics_proto_server PRIVATE lcz_rpc)
+set_target_properties(metrics_proto_server PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 add_executable(shm_benchmark_proto_server shm_benchmark_proto_server.cc)
 target_link_libraries(shm_benchmark_proto_server PRIVATE lcz_rpc)
 set_target_properties(shm_benchmark_proto_server PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
