@@ -188,16 +188,19 @@ namespace lcz_rpc
         public:
             // ---------- 路径二：纯 Proto API ----------
             // 同步 call_proto：Req/Resp 为 protobuf 类型，线缆为二进制，零 JSON
+            // error_code 传出参数：成功时写空串；失败时写可读错误分类名(send_failed / backoff / remote_TIMEOUT ...)
             template <typename Req, typename Resp>
             bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, Resp *resp,
-                            std::chrono::milliseconds timeout = std::chrono::seconds(5)) // 默认5s超时，平衡慢请求与快速失败
+                            std::chrono::milliseconds timeout = std::chrono::seconds(5),
+                            std::string *error_code = nullptr) // 默认5s超时，平衡慢请求与快速失败
             {
                 LCZ_DEBUG("RpcCaller call_proto sync method=%s", method_name.c_str());
                 std::string host = conn->peerAddress();
                 if (_breaker && !_breaker->allowRequest(method_name, host))
                 {
                     LCZ_WARN("熔断拒绝 method=%s host=%s", method_name.c_str(), host.c_str());
+                    if (error_code) *error_code = "circuit_open";
                     return false;
                 }
                 auto req_msg = MessageFactory::create<ProtoRpcRequest>();
@@ -210,6 +213,7 @@ namespace lcz_rpc
                 if (!req.SerializeToString(&body))
                 {
                     LCZ_ERROR("call_proto: Req::SerializeToString failed");
+                    if (error_code) *error_code = "serialize_failed";
                     if (_breaker) _breaker->onFailure(method_name, host);
                     return false;
                 }
@@ -219,6 +223,7 @@ namespace lcz_rpc
                 if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), resp_msg, timeout))
                 {
                     LCZ_ERROR("call_proto sync send failed");
+                    if (error_code) *error_code = "send_failed";
                     if (_breaker) _breaker->onFailure(method_name, host);
                     return false;
                 }
@@ -226,6 +231,7 @@ namespace lcz_rpc
                 if (!proto_resp)
                 {
                     LCZ_ERROR("call_proto: response type not ProtoRpcResponse");
+                    if (error_code) *error_code = "parse_failed";
                     if (_breaker) _breaker->onFailure(method_name, host);
                     return false;
                 }
@@ -233,6 +239,7 @@ namespace lcz_rpc
                 {
                     int64_t wait_ms = proto_resp->retryAfterMs();
                     if (wait_ms <= 0) wait_ms = 10; // 兜底 10ms
+                    // BACKOFF 不是最终失败，下面还有重试；只有重试也失败才设 error_code = "backoff"
                     LCZ_WARN("call_proto BACKOFF method=%s, 等待 %ldms 后重试一次", method_name.c_str(), wait_ms);
                     std::this_thread::sleep_for(std::chrono::milliseconds(wait_ms));
 
@@ -248,6 +255,7 @@ namespace lcz_rpc
                     if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(retry_req), retry_resp, timeout))
                     {
                         LCZ_ERROR("call_proto BACKOFF 重试 send 失败");
+                        if (error_code) *error_code = "send_failed";
                         if (_breaker) _breaker->onFailure(method_name, host);
                         return false;
                     }
@@ -255,12 +263,14 @@ namespace lcz_rpc
                     if (!proto_resp)
                     {
                         LCZ_ERROR("call_proto BACKOFF 重试: response type not ProtoRpcResponse");
+                        if (error_code) *error_code = "parse_failed";
                         if (_breaker) _breaker->onFailure(method_name, host);
                         return false;
                     }
                     if (proto_resp->rcode() == RespCode::BACKOFF)
                     {
                         LCZ_ERROR("call_proto BACKOFF 重试再次被拒绝 method=%s", method_name.c_str());
+                        if (error_code) *error_code = "backoff";
                         if (_breaker) _breaker->onFailure(method_name, host);
                         return false;
                     }
@@ -269,12 +279,14 @@ namespace lcz_rpc
                 if (proto_resp->rcode() != RespCode::SUCCESS)
                 {
                     LCZ_ERROR("call_proto error: %s", errReason(proto_resp->rcode()).c_str());
+                    if (error_code) *error_code = std::string("remote_") + errReason(proto_resp->rcode());
                     if (_breaker) _breaker->onFailure(method_name, host);
                     return false;
                 }
                 if (!resp->ParseFromString(proto_resp->body()))
                 {
                     LCZ_ERROR("call_proto: Resp::ParseFromString failed");
+                    if (error_code) *error_code = "parse_failed";
                     if (_breaker) _breaker->onFailure(method_name, host);
                     return false;
                 }

@@ -6,6 +6,7 @@
 // 按 brpc /vars 对标，覆盖：server uptime, error code, circuit breaker, token bucket
 // =============================================================================
 #include "metrics.hpp"
+#include "../general/fields.hpp"
 #include <chrono>
 
 namespace lcz_rpc
@@ -58,7 +59,10 @@ namespace lcz_rpc
 
                 if (rcode != 0)
                 {
-                    Labels els = {{"method", method}, {"code", std::to_string(rcode)}};
+                    // 用 errReason 将 RespCode int 转为可读字符串（如 5→TIMEOUT, 10→BACKOFF），
+                    // 替换之前裸整数 "code=5" 无法直读的问题
+                    std::string reason = errReason(static_cast<RespCode>(rcode));
+                    Labels els = {{"method", method}, {"code", reason}};
                     METRICS_COUNTER("rpc_errors_total", "RPC handler errors", els).inc();
                 }
             }
@@ -70,16 +74,26 @@ namespace lcz_rpc
                 METRICS_COUNTER("rpc_client_requests_total", "Client requests", ls).inc();
                 METRICS_GAUGE("rpc_client_concurrency", "Client in-flight", ls).inc();
             }
-            static void onClientRecv(const std::string &method, double lat_us, bool success)
+            // error_code 空串 = 成功；非空 = 具体错误分类名 (send_failed/backoff/remote_TIMEOUT ...)
+            static void onClientRecv(const std::string &method, double lat_us, const std::string& error_code)
             {
                 Labels ls = {{"method", method}};
                 METRICS_HISTO("rpc_client_latency_us", "Client RTT in us", ls).observe(lat_us);
                 METRICS_GAUGE("rpc_client_concurrency", "Client in-flight", ls).dec();
-                // 无论成败都 touch 错误计数（成功时 +0）：
-                // Counter 是懒注册的，若只在失败时写，零错误期间序列不存在，
-                // Prometheus 无法区分"没有错误"和"没有该指标"，报警规则也无法预建
-                Labels els = {{"method", method}, {"code", "error"}};
-                METRICS_COUNTER("rpc_client_errors_total", "Client errors", els).add(success ? 0 : 1);
+                if (!error_code.empty())
+                {
+                    Labels els = {{"method", method}, {"code", error_code}};
+                    METRICS_COUNTER("rpc_client_errors_total", "Client errors", els).inc();
+                }
+                // 预注册最常见的失败原因为 0，确保 Prometheus 在零错误期也能看到序列
+                else
+                {
+                    for (const char* ec : {"send_failed", "backoff", "parse_failed", "circuit_open"})
+                    {
+                        Labels els = {{"method", method}, {"code", ec}};
+                        METRICS_COUNTER("rpc_client_errors_total", "Client errors", els).add(0);
+                    }
+                }
             }
 
             // 连接新建/关闭
@@ -121,6 +135,22 @@ namespace lcz_rpc
                     Labels els = {{"method", method}, {"code", "failed"}};
                     METRICS_COUNTER("registry_heartbeat_errors_total", "Failed heartbeats", els).inc();
                 }
+            }
+
+            // lyqtrpc_build_info：版本/commit/构建时间，恒为 1 的 gauge，
+            // 供 Grafana 按版本关联指标、定位部署变更时间点
+            static void buildInfo()
+            {
+#ifdef LCZ_RPC_VERSION
+                Labels ls = {{"version", LCZ_RPC_VERSION},
+                              {"commit", LCZ_GIT_COMMIT},
+                              {"build_time", LCZ_BUILD_TIME}};
+#else
+                Labels ls = {{"version", "unknown"},
+                              {"commit", "unknown"},
+                              {"build_time", "unknown"}};
+#endif
+                METRICS_GAUGE("lyqtrpc_build_info", "Build metadata (value=1)", ls).set(1);
             }
 
             // exportText 时自动注入 uptime(无需单独注册)

@@ -286,15 +286,16 @@ namespace lcz_rpc
                 }
                 // ---- Prometheus 客户端指标埋点 ----
                 // onClientSend: rpc_client_requests_total +1、in-flight 并发 +1
-                // onClientRecv: RTT 入直方图、并发 -1、失败时错误计数 +1
+                // onClientRecv: RTT 入直方图、并发 -1、失败时按具体错误类型计数
                 // 这里测到的是"端到端 RTT"（含网络+服务端处理），
                 // 与服务端 rpc_request_duration_us（仅 handler 耗时）互补
                 auto t1 = std::chrono::steady_clock::now();
                 lcz_rpc::metrics::MetricHooks::onClientSend(method_name);
-                bool ok = _caller->call_proto(client->connection(), method_name, req, resp, timeout);
+                std::string error_code;
+                bool ok = _caller->call_proto(client->connection(), method_name, req, resp, timeout, &error_code);
                 auto t2 = std::chrono::steady_clock::now();
                 double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-                lcz_rpc::metrics::MetricHooks::onClientRecv(method_name, lat, ok);
+                lcz_rpc::metrics::MetricHooks::onClientRecv(method_name, lat, error_code);
                 return ok;
             }
 

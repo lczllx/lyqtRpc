@@ -115,7 +115,7 @@ lyqtRpc/
 │   └── muduo/                # Git 子模块
 ├── autobuild/                # 构建 + Docker 脚本
 ├── demosh/                   # 演示脚本
-├── docs/                     # 设计文档 + 面试准备
+├── docs/                     # 设计文档
 ├── Dockerfile
 └── docker-compose.yml
 ```

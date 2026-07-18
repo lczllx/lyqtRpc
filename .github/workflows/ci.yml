@@ -160,7 +160,7 @@ jobs:
           FAIL=0
           for pat in \
             'rpc_requests_total{method="echo"} 100' \
-            'rpc_errors_total{method="echo"} 0' \
+            'rpc_errors_total{method="echo",code="INTERNAL_ERROR"} 0' \
             'rpc_request_duration_us_bucket{method="echo",le="+Inf"} 100' \
             'process_resident_memory_bytes' \
             'process_open_fds' \

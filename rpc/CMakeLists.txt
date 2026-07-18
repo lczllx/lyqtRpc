@@ -8,6 +8,23 @@ set(CMAKE_CXX_EXTENSIONS OFF)  #不要 GNU 扩展
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer") #perf 采样需要帧指针
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) #生成 compile_commands.json（给 IDE）
 
+# ---- lyqtrpc_build_info 版本元数据 ----
+# 在 cmake 配置时捕获 git commit（HEAD），构建时有此定义则嵌入二进制
+execute_process(COMMAND git rev-parse --short=8 HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE LCZ_GIT_COMMIT
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT LCZ_GIT_COMMIT)
+    set(LCZ_GIT_COMMIT "unknown")
+endif()
+string(TIMESTAMP LCZ_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ")
+add_compile_definitions(
+    LCZ_RPC_VERSION="0.2.0"
+    LCZ_GIT_COMMIT="${LCZ_GIT_COMMIT}"
+    LCZ_BUILD_TIME="${LCZ_BUILD_TIME}"
+)
+
 option(LCZ_RPC_BUILD_EXAMPLES "构建 example 目录中的示例程序" ON)
 option(LCZ_RPC_BUILD_TESTS "构建单元测试（GoogleTest，需系统已安装，如 Ubuntu: libgtest-dev）" OFF)
 

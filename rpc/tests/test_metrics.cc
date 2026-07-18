@@ -180,21 +180,23 @@ TEST(MetricsExport, HelpAndTypeHeaders) {
 // 成功调用也要 touch 错误计数（预注册为 0），否则零错误期间序列不存在，
 // Prometheus 无法区分"没有错误"和"没有该指标"——本项目踩过的坑
 TEST(MetricsHooks, ClientErrorCounterPreRegisteredAtZero) {
+    // 成功调用预注册最常见的几种错误原因为 0
     MetricHooks::onClientSend("ut_hook_ok");
-    MetricHooks::onClientRecv("ut_hook_ok", 12.3, /*success=*/true);
+    MetricHooks::onClientRecv("ut_hook_ok", 12.3, /*error_code=*/"");
     std::string out = Registry::instance().exportText();
     EXPECT_NE(out.find(
-        "rpc_client_errors_total{method=\"ut_hook_ok\",code=\"error\"} 0"),
+        "rpc_client_errors_total{method=\"ut_hook_ok\",code=\"send_failed\"} 0"),
         std::string::npos) << out;
 }
 
 // 失败调用错误计数 +1
 TEST(MetricsHooks, ClientErrorCounterIncrementsOnFailure) {
+    // 失败调用用具体错误类型标记
     MetricHooks::onClientSend("ut_hook_fail");
-    MetricHooks::onClientRecv("ut_hook_fail", 99.0, /*success=*/false);
+    MetricHooks::onClientRecv("ut_hook_fail", 99.0, /*error_code=*/"send_failed");
     std::string out = Registry::instance().exportText();
     EXPECT_NE(out.find(
-        "rpc_client_errors_total{method=\"ut_hook_fail\",code=\"error\"} 1"),
+        "rpc_client_errors_total{method=\"ut_hook_fail\",code=\"send_failed\"} 1"),
         std::string::npos);
 }
 

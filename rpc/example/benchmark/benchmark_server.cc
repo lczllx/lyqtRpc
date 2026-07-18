@@ -45,7 +45,8 @@ int main(int argc, char* argv[]) {
             conc.inc();
             auto t1 = std::chrono::steady_clock::now();
             try { fn(c, req, resp); } catch (...) {
-                METRICS_COUNTER("rpc_errors_total", "RPC handler errors", ls).inc();
+                lcz_rpc::metrics::Labels err_ls = {{"method", method}, {"code", "INTERNAL_ERROR"}};
+                METRICS_COUNTER("rpc_errors_total", "RPC handler errors", err_ls).inc();
                 conc.dec(); throw;
             }
             auto t2 = std::chrono::steady_clock::now();
@@ -60,11 +61,13 @@ int main(int argc, char* argv[]) {
     // 预注册各 method 的错误计数为 0：Counter 懒注册，
     // 不预注册则首个错误发生前 /metrics 里看不到该序列，
     // Prometheus 无法区分"零错误"和"指标不存在"
+    // 预注册 INTERNAL_ERROR 错误码为 0（handler 异常时才上报此码）
     for (const std::string m : {"add", "echo", "heavy"}) {
-        lcz_rpc::metrics::Labels els = {{"method", m}};
+        lcz_rpc::metrics::Labels els = {{"method", m}, {"code", "INTERNAL_ERROR"}};
         METRICS_COUNTER("rpc_errors_total", "RPC handler errors", els);
     }
     lcz_rpc::metrics::MetricHooks::onServerStart(4);
+    lcz_rpc::metrics::MetricHooks::buildInfo();    // lyqtrpc_build_info 版本号
     lcz_rpc::metrics::MetricsServer::start(metrics_port);
 
     // 后台线程: RpcServer 必须在自己的线程构造+启动
