@@ -22,6 +22,13 @@ int main() {
     signal(SIGTERM, [](int){ running = false; });
     lcz::LoggerManager::getInstance().rootLogger()->setLevel(lcz::LogLevel::value::ERROR);
 
+    // 初始化指标（进程启动时间起点 + 预注册错误计数 + 版本号）
+    lcz_rpc::metrics::MetricHooks::onServerStart(4);
+    for (const std::string m : {"add", "echo"}) {
+        lcz_rpc::metrics::Labels els = {{"method", m}, {"code", "INTERNAL_ERROR"}};
+        METRICS_COUNTER("rpc_errors_total", "RPC handler errors", els);
+    }
+    lcz_rpc::metrics::MetricHooks::buildInfo();
     // 启动 Prometheus /metrics HTTP 端点（后台线程，端口 9090）
     lcz_rpc::metrics::MetricsServer::start(9090);
     std::cout << "[metrics] Prometheus /metrics endpoint on :9090" << std::endl;
