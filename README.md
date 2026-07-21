@@ -2,43 +2,46 @@
 
 [![CI](https://github.com/lczllx/lyqtRpc/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/lczllx/lyqtRpc/actions/workflows/ci.yml)
 
-基于 muduo + Protobuf 的轻量级 C++ RPC 框架，支持 TCP 和共享内存（SHM）双传输模式，集成 etcd 注册中心、熔断器、令牌桶流控和分布式追踪。
+[中文](README.zh-CN.md)
 
-> 作者：lczllx / 语言：C++17 / 网络：muduo / 传输：TCP · SHM 零拷贝 / 序列化：Protobuf · JSON · FlatBuffers / 构建：CMake
+> A lightweight C++17 RPC framework built on muduo + Protobuf. Dual TCP / shared-memory zero-copy transport, etcd registry, circuit breaker, token bucket, distributed tracing, Prometheus metrics, and an HTTP-to-RPC API gateway — all in one repo.
 
-## 功能亮点
+Author: lczllx · Language: C++17 · Network: muduo · Transport: TCP & SHM zero-copy · Serialization: Protobuf, JSON, FlatBuffers · Build: CMake
 
-- **双传输模式**：TCP（LV 变长协议）和 SHM 零拷贝（per-client ring buffer + Protobuf `SerializeToArray` 直写）
-- **服务治理**：etcd 注册中心、心跳保活、CAS 选主、负载上报、三态熔断器、令牌桶流控
-- **调用方式**：同步、`std::future` 异步、回调三种模式
-- **序列化可插拔**：`ISerializer` 抽象接口，默认 Protobuf，支持 JSON 调试、FlatBuffers 零拷贝读
-- **分布式追踪**：`trace_id` + `span_id` 全链路透传
-- **多客户端并发**：SHM 路径服务端 muduo `EventLoopThread` 线程池，per-client 独立 ring buffer
-- **可观测性**：内建 Prometheus `/metrics` 端点（文本协议 0.0.4），暴露请求量/延迟直方图/并发度/错误数/连接数/熔断状态/令牌桶余量/进程级指标，覆盖 brpc `/vars` 核心项
+## Highlights
 
-## 性能：lyqtRpc vs brpc
+- **Dual transport**: TCP (LV variable-length framing) and SHM zero-copy (per-client ring buffer + Protobuf `SerializeToArray` direct write)
+- **Service governance**: etcd registry, heartbeat keep-alive, CAS leader election, load reporting, three-state circuit breaker, token bucket rate limiting
+- **Call models**: synchronous, `std::future` async, and callback-based
+- **Pluggable serialization**: `ISerializer` abstraction, default Protobuf, JSON for debugging, FlatBuffers for zero-copy reads
+- **Distributed tracing**: `trace_id` + `span_id` end-to-end propagation
+- **Multi-client concurrency**: SHM path with muduo `EventLoopThread` worker pool, per-client independent ring buffers
+- **Observability**: built-in Prometheus `/metrics` endpoint (text format 0.0.4), covering request count / latency histogram / concurrency / error count / connection count / circuit breaker state / token bucket / process-level metrics — mirrors brpc `/vars`
+- **API Gateway**: HTTP→RPC gateway on the same muduo foundation, with route matching, rate limiting, circuit breaker, Prometheus metrics, and distributed tracing — deployed as a separate process, zero changes to the RPC framework
 
-测试环境：4C8G 云机, Ubuntu 22.04, g++ 12.3.0, 全部 Protobuf 序列化, echo 字符串回显。brpc 1.17.0。
+## Performance: lyqtRpc vs brpc
 
-### 单线程延迟与吞吐
+Test environment: 4C8G cloud VM, Ubuntu 22.04, g++ 12.3.0, all Protobuf, echo payload. brpc 1.17.0.
 
-| 载荷 | brpc TCP | lyqtRpc TCP Proto | lyqtRpc SHM Proto ZC |
+### Single-thread latency & throughput
+
+| Payload | brpc TCP | lyqtRpc TCP Proto | lyqtRpc SHM Proto ZC |
 |---|---:|---:|---:|
 | 16B QPS | ~14,000 | 10,706 | **25,216** |
 | 16B P50 | ~68μs | 90μs | **28μs** |
 | 64KB QPS | ~4,300 | 2,059 | **11,552** |
 | 64KB P50 | ~220μs | 459μs | **68μs** |
 
-### 4 线程并发
+### 4-thread concurrency
 
-| 指标 | brpc TCP | lyqtRpc TCP Proto | lyqtRpc SHM Proto ZC |
+| Metric | brpc TCP | lyqtRpc TCP Proto | lyqtRpc SHM Proto ZC |
 |---|---:|---:|---:|
 | QPS | ~48,000 | 35,660 | **123,250** |
 | P50 | ~82μs | 105μs | **17μs** |
 
-SHM 单线程延迟是 brpc 的 41%，4 线程降至 21%。TCP 路径与 brpc 差距约 30%，根因是 bthread 协程、IOBuf 零拷贝、baidu_std 多路复用等架构差异。
+SHM single-thread latency is 41% of brpc, dropping to 21% at 4 threads. The ~30% gap on the TCP path stems from bthread coroutines, IOBuf zero-copy chains, and baidu_std multiplexing in brpc.
 
-## 快速开始
+## Quick Start
 
 ```bash
 git clone https://github.com/lczllx/lyqtRpc.git
@@ -47,43 +50,55 @@ git submodule update --init --recursive
 bash autobuild/quick_build.sh
 ```
 
-### Docker 部署
+### Docker
 
 ```bash
-bash autobuild/docker.sh doctor   # 诊断环境
-bash autobuild/docker.sh setup    # 自动配网 + 构建镜像 + 启动（etcd + registry + provider）
+bash autobuild/docker.sh doctor
+bash autobuild/docker.sh setup
 ```
 
-### 运行示例
+### Examples
 
 ```bash
-# TCP RPC 示例（需先启动 etcd）
+# TCP RPC (requires etcd)
 docker compose up -d etcd
 bash demosh/demo.sh etcd
 
-# SHM Proto 零拷贝示例（无需额外依赖）
+# SHM Proto zero-copy (no extra dependencies)
 cd rpc/build
 ./bin/shm_proto_server &
 ./bin/shm_proto_client
 
-# 全路径压测
+# Full-path benchmark
 cd example/shm && bash run_shm_benchmark.sh all
 ```
 
-### 查看 Prometheus 指标
+### Prometheus metrics
 
 ```bash
-# 压测服务端自带 /metrics 端点（默认 9090，第 5 个参数可改）
 cd rpc/build
 ./bin/benchmark_server 8889 0 8080 0 &
 ./bin/benchmark_client single echo 2000 1 1
-curl localhost:9090/metrics    # 请求量/延迟直方图/错误数/连接数/process_*
+curl localhost:9090/metrics
 ```
 
-接入 Prometheus 只需在 `prometheus.yml` 的 `scrape_configs` 里加上该地址；
-P99 等分位数用查询侧计算：`histogram_quantile(0.99, rate(rpc_request_duration_us_bucket[1m]))`。
+Add the address to `prometheus.yml` `scrape_configs`. Percentiles are computed query-side:
+`histogram_quantile(0.99, rate(rpc_request_duration_us_bucket[1m]))`.
 
-## 架构
+### API Gateway
+
+```bash
+cd rpc/build
+./bin/benchmark_server 8889 &      # 1. start RPC backend
+./bin/gateway_server &             # 2. start gateway (HTTP :8080, metrics :9091)
+
+curl -d '{"data":"hello"}' localhost:8080/api/echo   # → RPC echo backend
+curl localhost:8080/api/health                        # → health check
+curl localhost:8080/diagnose                          # → rate limiter + breaker status
+curl localhost:9091/metrics | grep gateway            # → gateway metrics
+```
+
+## Architecture
 
 ```
 Provider ──REGISTER/HEARTBEAT──> Registry(etcd) <──DISCOVER── Consumer
@@ -91,79 +106,83 @@ Provider ──REGISTER/HEARTBEAT──> Registry(etcd) <──DISCOVER── Co
    └── RPC call ────────────────────────────────────────────>─┘
 ```
 
-- **LV 协议帧**：`| 4B total_len | 4B msg_type | 4B id_len | id | body |`
-- **SHM 零拷贝**：`SerializeToArray` 直写 ring buffer → `eventfd` → `ParseFromArray`，绕过 TCP 协议栈
-- **注册存储**：`LCZ_ETCD` 环境变量切换 Memory/Etcd 后端，默认单机内存模式
-- **熔断器**：三态（CLOSED→OPEN→HALF_OPEN），method×host 粒度，支持内存/etcd 持久化
-- **流控**：`TokenBucket` + `BACKOFF` 自动退避重试
-- **线程池**：muduo `EventLoopThread`，per-client 独立 ring buffer，无锁 SPSC
+- **LV framing**: `| 4B total_len | 4B msg_type | 4B id_len | id | body |`
+- **SHM zero-copy**: `SerializeToArray` → ring buffer → `eventfd` → `ParseFromArray`, bypassing TCP
+- **Registry backend**: `LCZ_ETCD` env var switches between Memory / Etcd; defaults to in-memory
+- **Circuit breaker**: three-state (CLOSED→OPEN→HALF_OPEN), method×host granularity, memory/etcd persistence
+- **Rate limiter**: `TokenBucket` + `BACKOFF` automatic backoff and retry
+- **Thread pool**: muduo `EventLoopThread`, per-client ring buffer, lock-free SPSC
 
-> 详细的流程图、注册发现、心跳摘除、超时控制见 [docs/architecture.md](docs/architecture.md)
+> See [docs/en/architecture-en.md](docs/en/architecture-en.md) for detailed flowcharts.
 
-## 目录
+## Directory
 
 ```text
 lyqtRpc/
 ├── rpc/
 │   ├── src/
-│   │   ├── client/           # RpcClient, ClientDiscover, 熔断器, ShmClient 系列
-│   │   ├── server/           # RpcServer, Registry, 选举, ShmServer 系列
-│   │   └── general/          # ShmChannel, LVProtocol, 消息工厂, 序列化器, 日志
-│   ├── tests/                # 54 个 GTest 单测
-│   ├── example/              # 示例 + 压测（shm/ 下含 SHM 全路径对比）
-│   ├── proto/                # protobuf 定义
-│   └── muduo/                # Git 子模块
-├── autobuild/                # 构建 + Docker 脚本
-├── demosh/                   # 演示脚本
-├── docs/                     # 设计文档
+│   │   ├── client/           # RpcClient, ClientDiscover, CircuitBreaker, ShmClient
+│   │   ├── server/           # RpcServer, Registry, LeaderElection, ShmServer
+│   │   └── general/          # ShmChannel, LVProtocol, MessageFactory, Serializer, Logger
+│   ├── tests/                # 76 GTest cases
+│   ├── example/              # Examples + benchmarks
+│   ├── proto/                # Protobuf definitions
+│   └── muduo/                # Git submodule
+├── gateway/
+│   ├── src/                  # HttpServer, HttpRouter, GatewayHandler, DiagnoseHandler
+│   └── example/              # gateway_server entry point
+├── autobuild/                # Build + Docker scripts
+├── demosh/                   # Demo scripts
+├── docs/                     # Design docs (cn + en)
+├── grafana/dashboards/       # Grafana dashboard JSON
 ├── Dockerfile
 └── docker-compose.yml
 ```
 
-## 构建
+## Build
 
-**依赖**：（`apt install` 一行搞定）
+**Dependencies** (one `apt install`):
 ```bash
 sudo apt-get install -y build-essential cmake g++ make \
   libboost-dev libjsoncpp-dev libcurl4-openssl-dev \
   protobuf-compiler libprotobuf-dev \
-  flatbuffers-compiler libflatbuffers-dev    # SHM FlatBuf 路径可选
+  flatbuffers-compiler libflatbuffers-dev    # optional, for SHM FlatBuf path
 ```
 
-**编译**：
+**Compile**:
 ```bash
 cd lyqtRpc/rpc && mkdir -p build && cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DLCZ_RPC_BUILD_EXAMPLES=ON
 make -j$(nproc)
 ```
 
-**运行单测**：`cmake .. -DLCZ_RPC_BUILD_TESTS=ON` 且已安装 `libgtest-dev`，构建后 `./bin/lcz_rpc_unit_tests`。
+**Unit tests**: `cmake .. -DLCZ_RPC_BUILD_TESTS=ON` with `libgtest-dev` installed, then `./bin/lcz_rpc_unit_tests`.
 
-## 规划
+## Roadmap
 
-- [x] Github Actions CI（编译 + 单测 + SHM smoke test）
-- [x] Docker 镜像 + docker-compose 编排
-- [x] etcd 注册存储（Lease + 环境变量切换 Memory/Etcd 后端）
-- [x] 三态熔断器（method×host 粒度，环境变量可配）
-- [x] 注册中心多实例 HA（etcd lease + CAS 选举）
-- [x] 令牌桶流控 + BACKOFF 退避
-- [x] 分布式追踪（trace_id/span_id 全链路透传）
-- [x] 序列化器抽象（ISerializer 接口 + ProtobufSerializer）
-- [ ] 监控导出（QPS、延迟分位、错误码）
+- [x] GitHub Actions CI (build + unit tests + SHM smoke test)
+- [x] Docker image + docker-compose
+- [x] etcd registry backend (Lease + LCZ_ETCD env-var switch)
+- [x] Three-state circuit breaker (method×host, configurable)
+- [x] Registry multi-instance HA (etcd lease + CAS election)
+- [x] Token bucket rate limiting + BACKOFF
+- [x] Distributed tracing (trace_id/span_id)
+- [x] Pluggable serializer (ISerializer + ProtobufSerializer)
+- [x] Prometheus /metrics (QPS / latency histogram / error codes / process metrics)
 
-## 已知缺陷
+## Known Limitations
 
-- TCP 路径单连接 `send()` 持锁，多线程竞争明显，计划引入连接池 + 协议多路复用
-- etcd 心跳每次 keepalive 失败后重新注册（Lease TTL 偏短），高频场景有写放大
-- SHM 大载荷（>64KB）ring buffer memcpy 两次，吞吐不如 TCP 零拷贝方案
-- 无鉴权/加密、无流式 RPC、Topic 无持久化
-- 单测仅覆盖核心模块，注册中心/熔断器/网络层无单测
+- TCP path single-connection `send()` holds a lock; connection pool + protocol multiplexing planned
+- etcd heartbeat re-registers on every keepalive failure (lease TTL too short), write amplification under load
+- SHM payloads >64KB copy twice through the ring buffer; throughput worse than TCP zero-copy equivalents
+- No auth / encryption; no streaming RPC; Topic has no persistence
+- Unit tests cover core modules only; registry / circuit breaker / network layer untested
 
-## 代码统计
+## Code Stats
 
-| 项目 | 数值 |
+| Item | Count |
 |---|---|
-| RPC 框架总行数 | 8,545（仅 `rpc/src/`，不含 muduo 子模块和 proto 生成代码） |
-| 单元测试 | 1,200+ 行，9 文件，54 用例（GTest） |
-| 示例代码 | 1,589 行 |
-| 源文件数 | 56（`rpc/src/` 下 .h/.hpp/.cc/.cpp） |
+| RPC framework LoC | 8,545 (`rpc/src/` only, excluding muduo and proto generated) |
+| Unit tests | 1,600+ lines, 12 files, 76 cases (GTest) |
+| Example code | 1,589 lines |
+| Source files | 56 (`rpc/src/` .h/.hpp/.cc/.cpp) |
