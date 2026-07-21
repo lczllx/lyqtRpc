@@ -38,6 +38,8 @@ namespace lcz_rpc
             return ok;
         }
 
+        double getRate() const { return _rate; }
+        double getBurst() const { return _burst; }
         // 返回建议的退避等待时间（毫秒），当前令牌耗尽时用
         int64_t retryAfterMs() const
         {
