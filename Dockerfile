@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 COPY rpc/ /src/rpc/
+COPY gateway/ /src/gateway/
 
 # 若 clone 时没用 --recursive，muduo 子模块目录为空 → 自动下载
 RUN if [ ! -f /src/rpc/muduo/CMakeLists.txt ]; then \
@@ -45,6 +46,7 @@ WORKDIR /src/rpc/build
 RUN cmake .. \
     -DCMAKE_BUILD_TYPE=Release \
     -DLCZ_RPC_BUILD_EXAMPLES=ON \
+    -DLCZ_RPC_BUILD_GATEWAY=ON \
     -DLCZ_RPC_BUILD_TESTS=OFF
 RUN cmake --build . -j$(nproc)
 
