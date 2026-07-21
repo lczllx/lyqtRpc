@@ -180,3 +180,8 @@ if(LCZ_RPC_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
+option(LCZ_RPC_BUILD_GATEWAY "Build API Gateway" ON)
+if(LCZ_RPC_BUILD_GATEWAY)
+  add_subdirectory(../gateway ${CMAKE_BINARY_DIR}/gateway)
+endif()
+
