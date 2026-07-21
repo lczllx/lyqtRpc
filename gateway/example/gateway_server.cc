@@ -30,7 +30,7 @@ static void onSignal(int)
         g_loop->quit();
 }
 
-int main()
+int main(int argc, char* argv[])
 {
     signal(SIGINT, onSignal);
     signal(SIGTERM, onSignal);
@@ -38,8 +38,18 @@ int main()
     muduo::net::EventLoop loop;
     g_loop = &loop;
 
+    // ---- 命令行参数 ----
+    std::string backend_host = "127.0.0.1";
+    int backend_port = 8889;
+    int http_port       = 8080;
+    int metrics_port    = 9091;
+    if (argc > 1 && strlen(argv[1]) > 0) backend_host  = argv[1];
+    if (argc > 2 && strlen(argv[2]) > 0) backend_port  = std::atoi(argv[2]);
+    if (argc > 3 && strlen(argv[3]) > 0) http_port      = std::atoi(argv[3]);
+    if (argc > 4 && strlen(argv[4]) > 0) metrics_port   = std::atoi(argv[4]);
+
     // ---- 后端 RPC 连接 ----
-    lcz_gateway::GatewayHandler handler(/*discover=*/false, "127.0.0.1", 8889);
+    lcz_gateway::GatewayHandler handler(/*discover=*/false, backend_host, backend_port);
 
     // ---- 限流：每秒 1000 请求，burst=2000 ----
     TokenBucket limiter(/*rate=*/1000.0, /*burst=*/2000.0);
@@ -47,7 +57,7 @@ int main()
     // ---- 指标初始化 ----
     MetricHooks::onServerStart(4);
     MetricHooks::buildInfo();
-    MetricsServer::start(/*port=*/9091); // 网关独立端口，不和 RPC Server 的 9090 冲突
+    MetricsServer::start(metrics_port);
     // 预注册网关错误码
     for (const char *path : {"/api/echo", "/api/health"})
         for (const char *code : {"429", "502", "500"})
@@ -66,7 +76,7 @@ int main()
                     { resp->setBody(R"({"status":"ok"})"); });
 
     // ---- HTTP Server ----
-    lcz_gateway::HttpServer srv(&loop, 8080, 4);
+    lcz_gateway::HttpServer srv(&loop, static_cast<uint16_t>(http_port), 4);
     srv.setCallback([&](const lcz_gateway::HttpReq &req,
                         lcz_gateway::HttpResp *resp)
                     {
@@ -114,9 +124,9 @@ int main()
         } });
 
     srv.start();
-    std::cout << "[gateway] :8080 ready (backend :8889, metrics :9091)" << std::endl;
-    std::cout << "  curl -d '{\"data\":\"hello\"}' http://localhost:8080/api/echo" << std::endl;
-    std::cout << "  curl localhost:9091/metrics | grep gateway" << std::endl;
+    std::cout << "[gateway] :" << http_port << " ready"
+              << " (backend " << backend_host << ":" << backend_port
+              << ", metrics :" << metrics_port << ")" << std::endl;
 
     loop.loop();
     MetricsServer::stop();

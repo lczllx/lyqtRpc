@@ -187,19 +187,29 @@ jobs:
             curl -sf -o /dev/null http://localhost:29090/metrics && break
             sleep 0.5
           done
-          # 起网关
-          ./bin/gateway_server &
+          # 起网关（传后端地址和端口，与 CI 中 benchmark_server 一致）
+          # argv: gateway_server <backend_host> <backend_port> <http_port> <metrics_port>
+          ./bin/gateway_server 127.0.0.1 28889 8080 29091 > /tmp/gateway.log 2>&1 &
           GW_PID=$!
-          sleep 2
+          # 轮询等网关 HTTP 端口就绪（最多 10s）
+          for i in $(seq 1 20); do
+            curl -sf -o /dev/null http://localhost:8080/api/health && break
+            if ! kill -0 $GW_PID 2>/dev/null; then
+              echo "::error ::gateway 进程已退出 (exit=$?)"
+              cat /tmp/gateway.log
+              exit 1
+            fi
+            sleep 0.5
+          done
           FAIL=0
-          # 1. echo 走通
+          # 1. echo 走通（HTTP→Proto→RPC→JSON 全链路）
           BODY=$(curl -s --max-time 10 -d '{"data":"ci_test"}' http://localhost:8080/api/echo)
           echo "$BODY" | grep -q '"data":"ci_test"' || { echo "::error ::echo mismatch: $BODY"; FAIL=1; }
           # 2. health 走通
           curl -s --max-time 5 http://localhost:8080/api/health | grep -q '"status":"ok"' || { echo "::error ::health failed"; FAIL=1; }
           # 3. 网关指标出现
-          curl -s --max-time 5 http://localhost:9091/metrics | grep -q 'gateway_requests_total' || { echo "::error ::gateway metrics missing"; FAIL=1; }
-          curl -s --max-time 5 http://localhost:9091/metrics | grep -q 'lyqtrpc_build_info' || { echo "::error ::build_info missing"; FAIL=1; }
+          curl -s --max-time 5 http://localhost:29091/metrics | grep -q 'gateway_requests_total' || { echo "::error ::gateway metrics missing"; FAIL=1; }
+          curl -s --max-time 5 http://localhost:29091/metrics | grep -q 'lyqtrpc_build_info' || { echo "::error ::build_info missing"; FAIL=1; }
           kill $GW_PID $SRV_PID 2>/dev/null || true
           wait 2>/dev/null || true
           exit $FAIL
