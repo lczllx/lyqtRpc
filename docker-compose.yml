@@ -16,11 +16,11 @@ services:
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
+      test: ["CMD-SHELL", "etcdctl endpoint health --dial-timeout=2s --command-timeout=5s || exit 1"]
       interval: 5s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+      timeout: 10s
+      retries: 6
+      start_period: 15s
     ports:
       - "2379:2379"
     volumes:
