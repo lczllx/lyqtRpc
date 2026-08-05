@@ -3,8 +3,8 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
-#include "../server/circuit_store.hpp"
-#include "../general/publicconfig.hpp"
+#include "server/circuit_store.hpp"
+#include "general/publicconfig.hpp"
 #include "node_breaker.hpp"
 namespace lcz_rpc
 {

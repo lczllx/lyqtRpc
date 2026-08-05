@@ -1,7 +1,7 @@
 #pragma once
 #include "requestor.hpp"
-#include "../general/message.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/message.hpp"
+#include "general/log_system/lcz_log.h"
 #include "circuit_breaker.hpp"
 #include <future>
 #include <functional>

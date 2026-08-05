@@ -2,8 +2,8 @@
 #include <memory>
 #include <ctime>
 #include "node_breaker.hpp"
-#include "../general/log_system/lcz_log.h"
-#include "../general/metrics_hooks.hpp"
+#include "general/log_system/lcz_log.h"
+#include "general/metrics_hooks.hpp"
 
 namespace lcz_rpc
 {

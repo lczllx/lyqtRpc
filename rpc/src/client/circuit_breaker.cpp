@@ -2,7 +2,7 @@
 #include <memory>
 #include <ctime>
 #include "circuit_breaker.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/log_system/lcz_log.h"
 
 namespace lcz_rpc
 {

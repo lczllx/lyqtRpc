@@ -9,11 +9,11 @@
 //   4. worker 通过 pipe 收到新客户端 req_fd → 加入 epoll → read_request → 派发
 // =============================================================================
 
-#include "../general/abstract.hpp"
-#include "../general/shm_channel.hpp"
-#include "../general/shm_connection.hpp"
-#include "../general/message.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/abstract.hpp"
+#include "general/shm_channel.hpp"
+#include "general/shm_connection.hpp"
+#include "general/message.hpp"
+#include "general/log_system/lcz_log.h"
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>

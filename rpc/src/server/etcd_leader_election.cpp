@@ -1,6 +1,6 @@
 #include "etcd_leader_election.hpp"
 #include "etcd_registry_store.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/log_system/lcz_log.h"
 #include <muduo/net/EventLoop.h>
 #include <jsoncpp/json/json.h>
 #include <unistd.h>

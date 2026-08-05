@@ -1,7 +1,7 @@
 #include <string>
 #include <memory>
 #include "etcd_circuit_store.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/log_system/lcz_log.h"
 #include <sstream>
 #include <jsoncpp/json/json.h>
 #include <boost/archive/iterators/base64_from_binary.hpp>

@@ -69,11 +69,42 @@ namespace lcz_gateway
             }
         }
 
+        // ---- /api/add —— two-number addition ----
+        void handleAdd(const HttpReq& req, HttpResp* resp)
+        {
+            lcz_rpc::proto::AddRequest  proto_req;
+            lcz_rpc::proto::AddResponse proto_resp;
+
+            auto status = google::protobuf::util::JsonStringToMessage(req.body, &proto_req);
+            if (!status.ok()) {
+                resp->status = 400;
+                resp->setBody(R"({"error":"invalid JSON"})");
+                return;
+            }
+
+            bool ok = _client.call_proto<lcz_rpc::proto::AddRequest,
+                                          lcz_rpc::proto::AddResponse>(
+                "add", proto_req, &proto_resp);
+
+            if (ok) {
+                std::string json_out;
+                google::protobuf::util::MessageToJsonString(proto_resp, &json_out);
+                resp->setBody(json_out);
+            } else {
+                resp->status = 502;
+                resp->setBody(R"({"error":"backend call failed","method":"add"})");
+            }
+        }
+
         // 返回可直接塞给 HttpRouter::addRoute 的 handler
         RouteHandler echoRoute()
         {
+            return [this](const HttpReq& r, HttpResp* w) { handleEcho(r, w); };
+        }
+        RouteHandler addHandler()
+        {
             return [this](const HttpReq &r, HttpResp *w)
-            { handleEcho(r, w); };
+            { handleAdd(r, w); };
         }
 
     private:

@@ -15,8 +15,8 @@
 // =============================================================================
 #include "http_server.hpp"
 #include "http_router.hpp"
-#include "../../rpc/src/general/metrics.hpp"
-#include "../../rpc/src/general/rate_limiter.hpp"
+#include "general/metrics.hpp"
+#include "general/rate_limiter.hpp"
 #include <sstream>
 
 namespace lcz_gateway

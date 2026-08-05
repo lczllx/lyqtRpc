@@ -1,9 +1,9 @@
 #pragma once
-#include "../general/net.hpp"
-#include "../general/message.hpp"
-#include "../general/dispacher.hpp"
-#include "../general/publicconfig.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/net.hpp"
+#include "general/message.hpp"
+#include "general/dispacher.hpp"
+#include "general/publicconfig.hpp"
+#include "general/log_system/lcz_log.h"
 #include "registry_store.hpp"
 #include <iostream>
 #include <set>

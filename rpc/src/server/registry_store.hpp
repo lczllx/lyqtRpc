@@ -1,6 +1,6 @@
 #pragma once
-#include "../general/publicconfig.hpp"
-#include "../general/net.hpp"
+#include "general/publicconfig.hpp"
+#include "general/net.hpp"
 #include<chrono>
 namespace lcz_rpc
 {

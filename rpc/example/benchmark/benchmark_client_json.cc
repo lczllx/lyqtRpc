@@ -1,5 +1,5 @@
-#include "../../src/client/rpc_client.hpp"
-#include "../../src/general/detail.hpp"
+#include "src/client/rpc_client.hpp"
+#include "src/general/detail.hpp"
 #include <chrono>
 #include <thread>
 #include <vector>

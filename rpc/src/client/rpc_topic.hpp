@@ -2,9 +2,9 @@
 #include "requestor.hpp"
 #include "caller.hpp"
 #include "rpc_registry.hpp"
-#include "../server/rpc_topic.hpp"
-#include "../general/publicconfig.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "server/rpc_topic.hpp"
+#include "general/publicconfig.hpp"
+#include "general/log_system/lcz_log.h"
 
 namespace lcz_rpc
 {

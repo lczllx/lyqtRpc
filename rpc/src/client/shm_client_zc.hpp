@@ -3,12 +3,12 @@
 // shm_client_zc.hpp — 零拷贝 SHM Client，多客户端
 // =============================================================================
 
-#include "../general/abstract.hpp"
-#include "../general/shm_channel.hpp"
-#include "../general/shm_connection.hpp"
-#include "../general/shm_zc_adaptor.hpp"
-#include "../general/message.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/abstract.hpp"
+#include "general/shm_channel.hpp"
+#include "general/shm_connection.hpp"
+#include "general/shm_zc_adaptor.hpp"
+#include "general/message.hpp"
+#include "general/log_system/lcz_log.h"
 #include "rpc_message_generated.h"
 #include <sys/epoll.h>
 #include <sys/socket.h>
