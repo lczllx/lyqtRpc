@@ -15,6 +15,9 @@ services:
       ALLOW_NONE_AUTHENTICATION: "yes"
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
       ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
     healthcheck:
       test: ["CMD-SHELL", "etcdctl endpoint health --dial-timeout=2s --command-timeout=5s || exit 1"]
       interval: 5s
@@ -29,6 +32,7 @@ services:
   registry:
     build:
       context: .
+      network: host
     restart: unless-stopped
     depends_on:
       etcd:
@@ -36,12 +40,16 @@ services:
     command: /opt/rpc/bin/test1_registry_server
     environment:
       LCZ_ETCD: http://etcd:2379
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
     ports:
       - "8080:8080"
 
   provider:
     build:
       context: .
+      network: host
     restart: unless-stopped
     depends_on:
       - registry
@@ -52,6 +60,9 @@ services:
       LCZ_REGISTRY_PORT: "8080"
       LCZ_PROVIDER_HOST: 127.0.0.1
       LCZ_PROVIDER_PORT: "8889"
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
     ports:
       - "8889:8889"
 
