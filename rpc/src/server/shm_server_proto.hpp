@@ -7,11 +7,11 @@
 // 线程池: muduo::net::EventLoopThreadPool + Channel 包装 req_fd
 // =============================================================================
 
-#include "../general/abstract.hpp"
-#include "../general/shm_channel.hpp"
-#include "../general/shm_connection.hpp"
-#include "../general/message.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/abstract.hpp"
+#include "general/shm_channel.hpp"
+#include "general/shm_connection.hpp"
+#include "general/message.hpp"
+#include "general/log_system/lcz_log.h"
 #include "muduo/net/EventLoop.h"
 #include "muduo/net/EventLoopThread.h"
 #include "muduo/net/Channel.h"

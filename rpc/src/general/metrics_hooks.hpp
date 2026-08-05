@@ -6,7 +6,7 @@
 // 按 brpc /vars 对标，覆盖：server uptime, error code, circuit breaker, token bucket
 // =============================================================================
 #include "metrics.hpp"
-#include "../general/fields.hpp"
+#include "general/fields.hpp"
 #include <chrono>
 
 namespace lcz_rpc

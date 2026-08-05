@@ -12,7 +12,12 @@
 FROM ubuntu:22.04 AS builder
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ARG http_proxy
+ARG https_proxy
+
+# 换清华源 + 超时重试，避免 build 卡在慢速 apt 镜像上
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list && \
+    apt-get update -o Acquire::http::Timeout=30 -o Acquire::Retries=3 && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     pkg-config \
@@ -54,9 +59,14 @@ RUN cmake --build . -j$(nproc)
 FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
+ARG http_proxy
+ARG https_proxy
+
 # 通过 -dev 元包拉取运行时库（避免硬编码 libjsoncpp25/libprotobuf23 版本号，
 # -dev 包依赖正确的运行时 .so，兼容 22.04/24.04 等不同 Ubuntu 版本）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list && \
+    apt-get update -o Acquire::http::Timeout=30 -o Acquire::Retries=3 && \
+    apt-get install -y --no-install-recommends \
     libjsoncpp-dev \
     libprotobuf-dev \
     libcurl4 \

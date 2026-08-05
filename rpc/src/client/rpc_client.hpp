@@ -7,11 +7,11 @@
 #include "rpc_topic.hpp"
 #include <string>
 #include <cstdlib>
-#include "../general/publicconfig.hpp"
-#include "../general/log_system/lcz_log.h"
-#include "../general/metrics_hooks.hpp"
-#include "../server/memory_circuit_store.hpp"
-#include "../server/etcd_circuit_store.hpp"
+#include "general/publicconfig.hpp"
+#include "general/log_system/lcz_log.h"
+#include "general/metrics_hooks.hpp"
+#include "server/memory_circuit_store.hpp"
+#include "server/etcd_circuit_store.hpp"
 
 namespace lcz_rpc
 {

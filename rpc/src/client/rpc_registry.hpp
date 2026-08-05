@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <random>
 #include <chrono> 
-#include "../general/publicconfig.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/publicconfig.hpp"
+#include "general/log_system/lcz_log.h"
 
 static constexpr int MAX_IDX = 1000000000; // 轮询索引上限（10亿），防止无界增长溢出
 

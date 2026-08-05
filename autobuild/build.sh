@@ -190,6 +190,9 @@ CMAKE_ARGS=(
     -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 )
 
+export CC=/usr/bin/gcc
+export CXX=/usr/bin/g++
+
 print_info "CMake 配置参数: ${CMAKE_ARGS[*]}"
 cmake "${CMAKE_ARGS[@]}" ..
 

@@ -1,10 +1,10 @@
 #pragma once
-#include "../general/net.hpp"
-#include "../general/message.hpp"
-#include "../general/dispacher.hpp"
-#include "../general/publicconfig.hpp"
-#include "../general/log_system/lcz_log.h"
-#include "../general/rate_limiter.hpp"
+#include "general/net.hpp"
+#include "general/message.hpp"
+#include "general/dispacher.hpp"
+#include "general/publicconfig.hpp"
+#include "general/log_system/lcz_log.h"
+#include "general/rate_limiter.hpp"
 #include <google/protobuf/message_lite.h>
 
 /*服务端对rpc请求的处理

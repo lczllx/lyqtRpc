@@ -6,11 +6,11 @@
 // 读端: read_response → ParseFromString（protobuf 紧凑二进制，快于 JSON）
 // =============================================================================
 
-#include "../general/abstract.hpp"
-#include "../general/shm_channel.hpp"
-#include "../general/shm_connection.hpp"
-#include "../general/message.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/abstract.hpp"
+#include "general/shm_channel.hpp"
+#include "general/shm_connection.hpp"
+#include "general/message.hpp"
+#include "general/log_system/lcz_log.h"
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <sys/un.h>

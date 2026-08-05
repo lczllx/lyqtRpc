@@ -1,6 +1,6 @@
-#include "../../src/client/rpc_client.hpp"
-#include "../../src/general/message.hpp"
-#include "../../src/general/metrics_server.hpp"
+#include "src/client/rpc_client.hpp"
+#include "src/general/message.hpp"
+#include "src/general/metrics_server.hpp"
 #include "rpc_envelope.pb.h"
 #include <chrono>
 #include <thread>

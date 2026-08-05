@@ -2,14 +2,14 @@
 // gateway_server.cc — API Gateway 启动入口
 // =============================================================================
 // Phase 4: 限流（TokenBucket → 429）+ 熔断（RpcClient 自带）+ 指标（Prometheus）
-#include "../src/http_server.hpp"
-#include "../src/http_router.hpp"
-#include "../src/gateway_handler.hpp"
-#include "../src/diagnose_handler.hpp"
-#include "../../rpc/src/general/rate_limiter.hpp"
-#include "../../rpc/src/general/metrics.hpp"
-#include "../../rpc/src/general/metrics_server.hpp"
-#include "../../rpc/src/general/metrics_hooks.hpp"
+#include "http_server.hpp"
+#include "http_router.hpp"
+#include "gateway_handler.hpp"
+#include "diagnose_handler.hpp"
+#include "general/rate_limiter.hpp"
+#include "general/metrics.hpp"
+#include "general/metrics_server.hpp"
+#include "general/metrics_hooks.hpp"
 #include <muduo/net/EventLoop.h>
 #include <iostream>
 #include <csignal>
@@ -69,6 +69,7 @@ int main(int argc, char* argv[])
     // ---- 路由表 ----
     lcz_gateway::HttpRouter router;
     router.addRoute("POST", "/api/echo", handler.echoRoute());
+    router.addRoute("POST", "/api/add",  handler.addHandler());
     lcz_gateway::DiagnoseHandler diag(limiter);
     router.addRoute("GET", "/diagnose", diag.route());
 

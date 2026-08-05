@@ -1,13 +1,13 @@
 #pragma once
-#include "../general/dispacher.hpp"
+#include "general/dispacher.hpp"
 #include "rpc_registry.hpp"
 #include "rpc_router.hpp"
-#include "../client/rpc_client.hpp"
+#include "client/rpc_client.hpp"
 #include <unordered_set>
 #include <iostream>
 #include <algorithm>
-#include "../general/publicconfig.hpp"
-#include "../general/log_system/lcz_log.h"
+#include "general/publicconfig.hpp"
+#include "general/log_system/lcz_log.h"
 namespace lcz_rpc
 {
     namespace server

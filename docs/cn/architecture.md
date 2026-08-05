@@ -243,6 +243,18 @@ Provider 端 `TokenBucket` 固定速率生成令牌。超限返回 `BACKOFF` + `
 
 支持 `BROADCAST` / `ROUND_ROBIN` / `FANOUT` / `SOURCE_HASH` / `PRIORITY` / `REDUNDANT` 六种转发策略，与 RPC 共用底层消息和网络。
 
+### API 网关
+
+独立进程，与 RPC Server 共用 muduo 网络库和 RpcClient 调用链。将 HTTP/JSON 请求翻译为 LV 帧 Proto 协议后转发到后端 RPC 服务，承担协议适配、入口限流、熔断代理和监控职责。
+
+- **网络层**：复用 muduo `TcpServer`（EventLoop + IO 线程池），HTTP/1.1 解析在 IO 线程回调内同步完成
+- **路由**：`HttpRouter` 支持精确匹配（O(1) 哈希）和前缀匹配（`/api/user/*`），与 `ProtoRpcRouter` 同款 `unordered_map` 设计
+- **协议转换**：HTTP JSON body → `google::protobuf::util::JsonStringToMessage` → `RpcClient::call_proto` → Proto response → `MessageToJsonString` → HTTP JSON 返回
+- **治理复用**：`RpcClient` 内部自带的 `CircuitBreaker`、超时控制、BACKOFF 退避全部零改动继承；网关入口额外挂 `TokenBucket`，桶空返回 HTTP 429 + `Retry-After` 头
+- **指标**：独立 `MetricsServer` 端点（默认 `:9091`），暴露 `gateway_requests_total`/`gateway_request_duration_us`（直方图）/`gateway_errors_total`（按 path×code 分类）
+- **排障**：`/diagnose` 端点返回限流器余量 + 全部熔断器状态，一份 JSON 定位问题
+- **启动**：`./bin/gateway_server <backend_host> <backend_port> <http_port> <metrics_port>`，后端端口默认 8889
+
 ### 可观测性（Prometheus /metrics）
 
 内建 Prometheus 文本协议（0.0.4）端点，对标 brpc `/vars` 核心项。设计为"业务线程内联埋点 + 独立线程按需导出"：

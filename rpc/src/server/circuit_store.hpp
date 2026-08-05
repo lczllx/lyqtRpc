@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 #include <memory>
-#include "../general/publicconfig.hpp"
+#include "general/publicconfig.hpp"
 
 namespace lcz_rpc
 {
