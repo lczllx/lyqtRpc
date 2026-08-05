@@ -201,6 +201,18 @@ Double-buffered async logger with background `AsyncLooper` thread. Five levels (
 
 Six forwarding strategies: `BROADCAST`, `ROUND_ROBIN`, `FANOUT`, `SOURCE_HASH`, `PRIORITY`, `REDUNDANT`. Shares the underlying messaging and network layer with RPC.
 
+### API Gateway
+
+A standalone process that shares muduo networking and the RpcClient call chain with the RPC server. It translates HTTP/JSON into LV-framed Proto, forwarding to backend RPC services while handling protocol adaptation, ingress rate limiting, circuit-breaking, and monitoring.
+
+- **Networking**: reuses muduo `TcpServer` (EventLoop + IO thread pool). HTTP/1.1 parsing completes synchronously inside the IO thread callback.
+- **Routing**: `HttpRouter` supports exact match (O(1) hash table) and prefix match (`/api/user/*`), same `unordered_map` pattern as `ProtoRpcRouter`.
+- **Protocol translation**: HTTP JSON body → `google::protobuf::util::JsonStringToMessage` → `RpcClient::call_proto` → Proto response → `MessageToJsonString` → HTTP JSON back.
+- **Governance reuse**: `RpcClient`'s built-in `CircuitBreaker`, timeout control, and BACKOFF retry are inherited without changes. An additional `TokenBucket` at the gateway entry returns HTTP 429 with a `Retry-After` header when the bucket is empty.
+- **Metrics**: independent `MetricsServer` endpoint (default `:9091`), exposing `gateway_requests_total` / `gateway_request_duration_us` (histogram) / `gateway_errors_total` (per path×code).
+- **Diagnostics**: `GET /diagnose` returns rate limiter state and all circuit breaker states in a single JSON blob.
+- **Startup**: `./bin/gateway_server <backend_host> <backend_port> <http_port> <metrics_port>`, default backend port 8889.
+
 ### Observability (Prometheus /metrics)
 
 Built-in Prometheus text-format (0.0.4) endpoint covering the core of brpc's `/vars`. The design is "inline instrumentation in business threads + on-demand export in a dedicated thread":
