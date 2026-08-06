@@ -6,7 +6,7 @@
 #   git push origin v0.1.0
 # 或在 GitHub 上从某个提交创建 tag。
 #
-# 产物：Release 附件 lcz-rpc-<tag>-linux-x64-binaries.zip（含 rpc/build/bin 与单元测试可执行文件）
+# 产物：Release 附件 lcz-rpc-<tag>-linux-x64-binaries.zip（含 rpc/build/bin 下全部可执行文件 + 单测）
 # 要求：仓库 Settings → Actions → General → Workflow permissions 允许读写 Contents（默认 fork 外仓库一般可）
 # =============================================================================
 
@@ -65,12 +65,12 @@ jobs:
 
       - name: Run unit tests
         working-directory: rpc/build
-        run: ./tests/lcz_rpc_unit_tests
+        run: ./bin/lcz_rpc_unit_tests
 
       - name: Package binaries
         run: |
           cd rpc/build
-          zip -r "${GITHUB_WORKSPACE}/lcz-rpc-${{ github.ref_name }}-linux-x64-binaries.zip" bin tests/lcz_rpc_unit_tests
+          zip -r "${GITHUB_WORKSPACE}/lcz-rpc-${{ github.ref_name }}-linux-x64-binaries.zip" bin
           ls -la "${GITHUB_WORKSPACE}"/lcz-rpc-*.zip
 
       - name: Create GitHub Release
