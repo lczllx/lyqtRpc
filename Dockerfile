@@ -1,11 +1,10 @@
 # =============================================================================
 # LCZ RPC — 多阶段镜像
-# -----------------------------------------------------------------------------
-# 构建：
-#   docker build -t lcz-rpc:local .
-#   docker compose up -d                     # 一键启动 etcd + registry + provider
-#
-# 无需手动初始化子模块 — muduo 缺失时自动从 GitHub 拉取
+# =============================================================================
+# 构建（无需手动初始化子模块，muduo 缺失时自动从 GitHub 拉取）：
+#   docker compose up -d
+#   docker compose logs -f          # 查看日志
+#   docker compose down -v          # 停止并清理数据卷
 # =============================================================================
 
 # ---------- 阶段 1：编译 ----------
@@ -15,9 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG http_proxy
 ARG https_proxy
 
-# 换清华源 + 超时重试，避免 build 卡在慢速 apt 镜像上
-RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list && \
-    apt-get update -o Acquire::http::Timeout=30 -o Acquire::Retries=3 && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     cmake \
     pkg-config \
@@ -55,18 +52,13 @@ RUN cmake .. \
     -DLCZ_RPC_BUILD_TESTS=OFF
 RUN cmake --build . -j$(nproc)
 
-# ---------- 阶段 2：运行（仅运行时库 + 可执行文件）----------
+# ---------- 阶段 2：运行 ----------
 FROM ubuntu:22.04
-ENV DEBIAN_FRONTEND=noninteractive
 
 ARG http_proxy
 ARG https_proxy
 
-# 通过 -dev 元包拉取运行时库（避免硬编码 libjsoncpp25/libprotobuf23 版本号，
-# -dev 包依赖正确的运行时 .so，兼容 22.04/24.04 等不同 Ubuntu 版本）
-RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list && \
-    apt-get update -o Acquire::http::Timeout=30 -o Acquire::Retries=3 && \
-    apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     libjsoncpp-dev \
     libprotobuf-dev \
     libcurl4 \
@@ -78,6 +70,4 @@ COPY --from=builder /src/rpc/build/bin /opt/rpc/bin
 
 WORKDIR /opt/rpc
 ENV PATH="/opt/rpc/bin:${PATH}"
-
-# 默认进入 shell，便于你手动起 registry / server / client
 CMD ["/bin/bash", "-lc", "echo 'LCZ RPC — 可执行文件位于 /opt/rpc/bin'; ls -la /opt/rpc/bin"]
