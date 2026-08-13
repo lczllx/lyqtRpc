@@ -2,6 +2,7 @@
 build/
 rpc/build/
 rpc/build-ci/
+rpc/build-*/   
 bin/
 lib/
 *.o
