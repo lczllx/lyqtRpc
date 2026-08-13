@@ -10,8 +10,8 @@ add_executable(gateway_server example/gateway_server.cc)
 target_include_directories(gateway_server
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
     PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../rpc/src    # client/ server/ general/
     PRIVATE ${CMAKE_BINARY_DIR}                       # rpc_envelope.pb.h
+    # rpc/src 由 lcz_rpc INTERFACE 库提供，无需重复添加 ../rpc/src
 )
 
 target_link_libraries(gateway_server

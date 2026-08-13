@@ -43,7 +43,7 @@ namespace lcz_gateway
             {
                 resp->status = 400;
                 resp->setBody(R"({"error":"invalid JSON: ")" +
-                              status.message().as_string() + "\"}");
+                              std::string(status.message()) + "\"}");
                 return;
             }
 
