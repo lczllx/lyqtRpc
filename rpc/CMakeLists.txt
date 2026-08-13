@@ -20,7 +20,7 @@ if(NOT LCZ_GIT_COMMIT)
 endif()
 string(TIMESTAMP LCZ_BUILD_TIME "%Y-%m-%dT%H:%M:%SZ")
 add_compile_definitions(
-    LCZ_RPC_VERSION="0.2.0"
+    LCZ_RPC_VERSION="0.5.0"
     LCZ_GIT_COMMIT="${LCZ_GIT_COMMIT}"
     LCZ_BUILD_TIME="${LCZ_BUILD_TIME}"
 )
@@ -28,15 +28,22 @@ add_compile_definitions(
 option(LCZ_RPC_BUILD_EXAMPLES "构建 example 目录中的示例程序" ON)
 option(LCZ_RPC_BUILD_TESTS "构建单元测试（GoogleTest，需系统已安装，如 Ubuntu: libgtest-dev）" OFF)
 
-# 统一使用系统安装的 jsoncpp（头文件路径 <jsoncpp/json/json.h>）
-# 先尝试 CMake 配置，若无则用 pkg-config（部分系统仅提供 pkg-config）
-find_package(jsoncpp QUIET)
+# jsoncpp：CONFIG（vcpkg）→ MODULE（apt FindJsonCpp.cmake）→ pkg-config → 手动找
+find_package(jsoncpp CONFIG QUIET)
+if(NOT jsoncpp_FOUND)
+    find_package(jsoncpp MODULE QUIET)
+endif()
 if(jsoncpp_FOUND)
     if(NOT TARGET jsoncpp_lib)
         add_library(jsoncpp_lib INTERFACE)
-        target_link_libraries(jsoncpp_lib INTERFACE jsoncpp::jsoncpp)
+        # vcpkg 的 target 是 JsonCpp::JsonCpp，apt/system 的是 jsoncpp::jsoncpp
+        if(TARGET JsonCpp::JsonCpp)
+            target_link_libraries(jsoncpp_lib INTERFACE JsonCpp::JsonCpp)
+        elseif(TARGET jsoncpp::jsoncpp)
+            target_link_libraries(jsoncpp_lib INTERFACE jsoncpp::jsoncpp)
+        endif()
     endif()
-    message(STATUS "使用系统安装的 jsoncpp (CMake)")
+    message(STATUS "jsoncpp: CMake find_package ✓")
 else()
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
@@ -49,9 +56,8 @@ else()
         add_library(jsoncpp_lib INTERFACE)
         target_include_directories(jsoncpp_lib INTERFACE ${JsonCpp_INCLUDE_DIRS})
         target_link_libraries(jsoncpp_lib INTERFACE ${JsonCpp_LINK_LIBRARIES})
-        message(STATUS "使用系统安装的 jsoncpp (pkg-config)")
+        message(STATUS "jsoncpp: pkg-config ✓")
     else()
-        # 最后尝试：直接找头文件和库（部分环境 pkg-config 包名不同）
         find_path(JSONCPP_INCLUDE_DIR jsoncpp/json/json.h PATHS /usr/include /usr/local/include)
         find_library(JSONCPP_LIBRARY jsoncpp PATHS /usr/lib /usr/local/lib /usr/lib/x86_64-linux-gnu)
         if(JSONCPP_INCLUDE_DIR AND JSONCPP_LIBRARY)
@@ -65,8 +71,11 @@ else()
     endif()
 endif()
 
-# Protobuf（路径二：纯 Proto RPC）
-find_package(Protobuf QUIET)
+# Protobuf：CONFIG（vcpkg）→ MODULE（apt FindProtobuf.cmake）
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+    find_package(Protobuf MODULE QUIET)
+endif()
 if(NOT Protobuf_FOUND)
     message(FATAL_ERROR "未找到 Protobuf。请安装:\n  Ubuntu/Debian: sudo apt install protobuf-compiler libprotobuf-dev\n  CentOS/RHEL:   sudo yum install protobuf-compiler protobuf-devel\n或运行 autobuild/build.sh 自动安装")
 endif()

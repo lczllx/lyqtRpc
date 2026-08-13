@@ -44,13 +44,12 @@ RUN if [ ! -f /src/rpc/muduo/CMakeLists.txt ]; then \
         echo ">>> muduo 拉取完成"; \
     fi
 
-WORKDIR /src/rpc/build
-RUN cmake .. \
-    -DCMAKE_BUILD_TYPE=Release \
+WORKDIR /src/rpc
+RUN cmake --preset system -B build \
     -DLCZ_RPC_BUILD_EXAMPLES=ON \
     -DLCZ_RPC_BUILD_GATEWAY=ON \
     -DLCZ_RPC_BUILD_TESTS=OFF
-RUN cmake --build . -j$(nproc)
+RUN cmake --build build -j$(nproc)
 
 # ---------- 阶段 2：运行 ----------
 FROM ubuntu:22.04

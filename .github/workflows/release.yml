@@ -55,13 +55,8 @@ jobs:
       - name: Configure & Build
         working-directory: rpc
         run: |
-          mkdir -p build
-          cd build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DLCZ_RPC_BUILD_TESTS=ON \
-            -DLCZ_RPC_BUILD_EXAMPLES=ON
-          cmake --build . -j$(nproc)
+          cmake --preset system -B build -DLCZ_RPC_BUILD_TESTS=ON -DLCZ_RPC_BUILD_EXAMPLES=ON
+          cmake --build build -j$(nproc)
 
       - name: Run unit tests
         working-directory: rpc/build

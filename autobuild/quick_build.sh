@@ -49,17 +49,12 @@ if [ ! -d "muduo" ] || [ -z "$(ls -A muduo 2>/dev/null)" ]; then
 fi
 
 # 构建
-mkdir -p build
-cd build
-
-if [ ! -f "CMakeCache.txt" ]; then
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DLCZ_RPC_BUILD_EXAMPLES=ON \
-          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-          ..
+if [ ! -f "build/CMakeCache.txt" ]; then
+    cmake --preset system -B build \
+          -DLCZ_RPC_BUILD_EXAMPLES=ON
 fi
 
-cmake --build . -j$(nproc)
+cmake --build build -j$(nproc)
 
 echo "[INFO] 构建完成！"
 

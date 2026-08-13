@@ -1,0 +1,28 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "system",
+      "displayName": "System (apt)",
+      "description": "Use system-installed libs via apt",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "/usr/bin/gcc",
+        "CMAKE_CXX_COMPILER": "/usr/bin/g++"
+      }
+    },
+    {
+      "name": "vcpkg",
+      "displayName": "vcpkg",
+      "description": "All deps via vcpkg (zero apt dependencies, protobuf first build ~30min)",
+      "inherits": "system",
+      "toolchainFile": "$env{HOME}/vcpkg/scripts/buildsystems/vcpkg.cmake",
+      "environment": {
+        "CC": "/usr/bin/gcc",
+        "CXX": "/usr/bin/g++",
+        "http_proxy": "$penv{http_proxy}",
+        "https_proxy": "$penv{https_proxy}"
+      }
+    }
+  ]
+}

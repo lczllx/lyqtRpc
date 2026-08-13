@@ -88,15 +88,10 @@ jobs:
           fi
 
       # CMake 工程在子目录 rpc/（不是仓库根）
+      # 使用 CMakePresets.json 的 system 预设：/usr/bin/gcc + /usr/bin/g++
       - name: Configure CMake
         working-directory: rpc
-        run: |
-          mkdir -p build
-          cd build
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DLCZ_RPC_BUILD_TESTS=ON \
-            -DLCZ_RPC_BUILD_EXAMPLES=ON
+        run: cmake --preset system -B build -DLCZ_RPC_BUILD_TESTS=ON -DLCZ_RPC_BUILD_EXAMPLES=ON
 
       # 全量编译：muduo + proto + 所有 example + 单元测试
       - name: Build entire RPC project

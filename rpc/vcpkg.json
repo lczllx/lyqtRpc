@@ -1,0 +1,14 @@
+{
+  "name": "lyqtrpc",
+  "version": "0.5.0",
+  "description": "High-performance C++ RPC framework with SHM zero-copy, API gateway, and metrics",
+  "dependencies": [
+    "protobuf",
+    "curl",
+    "jsoncpp",
+    "flatbuffers",
+    "gtest",
+    "benchmark",
+    "fmt"
+  ]
+}

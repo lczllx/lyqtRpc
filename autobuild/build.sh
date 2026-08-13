@@ -170,31 +170,20 @@ mkdir -p "$BUILD_DIR"
 
 # 5. 配置CMake
 print_info "配置 CMake..."
-cd "$BUILD_DIR"
 
 # 检查是否已有CMakeCache，如果有则询问是否清理
-if [ -f "CMakeCache.txt" ]; then
+if [ -f "$BUILD_DIR/CMakeCache.txt" ]; then
     print_warn "检测到已存在的构建配置"
     read -r -p "是否清理并重新配置？(y/n) " -n 1
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         print_info "清理构建目录..."
-        rm -rf ./*
+        rm -rf "$BUILD_DIR"/*
     fi
 fi
 
-# CMake配置
-CMAKE_ARGS=(
-    -DCMAKE_BUILD_TYPE=Release
-    -DLCZ_RPC_BUILD_EXAMPLES=ON
-    -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-)
-
-export CC=/usr/bin/gcc
-export CXX=/usr/bin/g++
-
-print_info "CMake 配置参数: ${CMAKE_ARGS[*]}"
-cmake "${CMAKE_ARGS[@]}" ..
+print_info "CMake 配置（预设: system）..."
+cmake --preset system -B "$BUILD_DIR"
 
 if [ $? -ne 0 ]; then
     print_error "CMake 配置失败"
@@ -208,7 +197,7 @@ print_info "开始编译项目..."
 CPU_CORES=$(nproc 2>/dev/null || echo 4)
 print_info "使用 $CPU_CORES 个CPU核心进行并行编译"
 
-cmake --build . -j"$CPU_CORES"
+cmake --build "$BUILD_DIR" -j"$CPU_CORES"
 
 if [ $? -ne 0 ]; then
     print_error "编译失败"
