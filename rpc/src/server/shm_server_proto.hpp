@@ -102,8 +102,10 @@ namespace lcz_rpc
 
                 auto conn = std::make_shared<ShmConnection>();
                 conn->setName("shm_server_proto_" + std::to_string(next_id - 1));
-                conn->setSender([entry](const BaseMessage::ptr &msg)
+                conn->setSender([weak_entry = std::weak_ptr<ClientEntry>(entry)](const BaseMessage::ptr &msg)
                                 {
+                auto entry = weak_entry.lock();
+                if (!entry) return; // 连接已销毁，通道句柄失效，丢弃响应
                 auto resp = std::dynamic_pointer_cast<ProtoRpcResponse>(msg);
                 if (!resp) return;
                 size_t contig = 0;
