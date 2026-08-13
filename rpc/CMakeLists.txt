@@ -28,6 +28,7 @@ add_compile_definitions(
 option(LCZ_RPC_BUILD_EXAMPLES "构建 example 目录中的示例程序" ON)
 option(LCZ_RPC_BUILD_TESTS "构建单元测试（GoogleTest，需系统已安装，如 Ubuntu: libgtest-dev）" OFF)
 option(LCZ_RPC_SANITIZE "启用 AddressSanitizer + UndefinedBehaviorSanitizer（仅测试用，会拖慢 2~5 倍，勿用于生产）" OFF)
+option(LCZ_RPC_BUILD_FUZZER "构建 libFuzzer 模糊测试目标（需 Clang，-fsanitize=fuzzer 仅 Clang 支持）" OFF)
 
 # ---- Sanitizers：内存错误 / 未定义行为检测 ----
 # ASan 抓越界/use-after-free/double-free/泄漏；UBSan 抓整数溢出/除零/空指针解引用。
@@ -189,6 +190,14 @@ set(MUDUO_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)#关掉 muduo 自带的 example
 add_subdirectory(muduo)
 
 add_subdirectory(src)
+
+# ---- Fuzzing：libFuzzer 驱动 LV 协议解析 ----
+if(LCZ_RPC_BUILD_FUZZER)
+    if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        message(FATAL_ERROR "libFuzzer 需要 Clang 编译器（-fsanitize=fuzzer 仅 Clang 支持），当前是 ${CMAKE_CXX_COMPILER_ID}。请用 fuzz preset：cmake --preset fuzz -B build-fuzz")
+    endif()
+    add_subdirectory(fuzz)
+endif()
 
 if(LCZ_RPC_BUILD_EXAMPLES)
   add_subdirectory(example)

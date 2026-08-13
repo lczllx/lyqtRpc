@@ -23,6 +23,20 @@
         "http_proxy": "$penv{http_proxy}",
         "https_proxy": "$penv{https_proxy}"
       }
+    },
+    {
+      "name": "fuzz",
+      "displayName": "Fuzz (Clang + libFuzzer)",
+      "description": "Clang + libFuzzer/ASan/UBSan, builds the LV-protocol fuzz target",
+      "inherits": "system",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "/usr/bin/clang",
+        "CMAKE_CXX_COMPILER": "/usr/bin/clang++",
+        "LCZ_RPC_BUILD_FUZZER": "ON",
+        "LCZ_RPC_BUILD_TESTS": "OFF",
+        "LCZ_RPC_BUILD_EXAMPLES": "OFF",
+        "LCZ_RPC_BUILD_GATEWAY": "OFF"
+      }
     }
   ]
 }

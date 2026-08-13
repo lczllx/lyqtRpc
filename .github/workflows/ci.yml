@@ -280,3 +280,46 @@ jobs:
           ASAN_OPTIONS: detect_leaks=0
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ./bin/lcz_rpc_unit_tests
+
+  # Fuzz 防线：libFuzzer 短跑 LV 协议解析，抓畸形输入导致的 crash/越界/UB 回归。
+  # libFuzzer 需 Clang（-fsanitize=fuzzer），用 fuzz preset；短跑 2 分钟，
+  # 若命中 crash libFuzzer 以非零退出，job 即失败。与 sanitize 并行。
+  fuzz:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies (incl. Clang)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang \
+            build-essential \
+            cmake \
+            pkg-config \
+            g++ \
+            make \
+            libboost-dev \
+            libjsoncpp-dev \
+            libcurl4-openssl-dev \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libflatbuffers-dev \
+            flatbuffers-compiler
+
+      - name: Configure CMake (fuzz preset)
+        working-directory: rpc
+        run: cmake --preset fuzz -B build-fuzz
+
+      - name: Build fuzz target
+        working-directory: rpc/build-fuzz
+        run: cmake --build . -j$(nproc)
+
+      - name: Run libFuzzer (short smoke)
+        working-directory: rpc/build-fuzz
+        run: ./bin/lcz_rpc_lv_fuzzer -max_total_time=120 -print_final_stats=1
