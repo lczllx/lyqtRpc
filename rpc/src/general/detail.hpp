@@ -38,16 +38,26 @@ class JSON{
     //字符串->json对象 data-反序列化后的json对象 input需要反序列化的字符串
     static bool deserialize(const std::string &input, Json::Value &data)
     {
-        Json::CharReaderBuilder crb;
-        std::string errs;
-        std::unique_ptr<Json::CharReader> cr(crb.newCharReader());
-        bool ret=cr->parse(input.c_str(),input.c_str()+input.size(),&data,&errs);
-        if (!ret) 
+        // jsoncpp 对畸形输入（内嵌 NUL、类型错位等）可能抛 Json::LogicError/RuntimeError，
+        // 而非仅返回 false，故必须 try-catch 兜底，否则异常会穿透到协议层导致进程 terminate。
+        try
         {
-            LCZ_ERROR("DeSerialize failed!,%s",errs.c_str());
+            Json::CharReaderBuilder crb;
+            std::string errs;
+            std::unique_ptr<Json::CharReader> cr(crb.newCharReader());
+            bool ret=cr->parse(input.c_str(),input.c_str()+input.size(),&data,&errs);
+            if (!ret)
+            {
+                LCZ_ERROR("DeSerialize failed!,%s",errs.c_str());
+                return false;
+            }
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            LCZ_ERROR("DeSerialize threw: %s", e.what());
             return false;
         }
-        return true;
 
     }
 };

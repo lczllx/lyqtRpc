@@ -32,7 +32,9 @@ namespace lcz_rpc
         virtual bool unserialize(const std::string &msg)override
         {
             bool ret = JSON::deserialize(msg,_data);
-            if (ret && _data.isMember("id"))
+            // _data 可能是非 object（如畸形 JSON 被解析成 Int/Array），
+            // isMember 在非 object 上会抛 Json::LogicError，这里先判 isObject 兜底。
+            if (ret && _data.isObject() && _data.isMember("id"))
                 setId(_data["id"].asString());
             return ret;
         }

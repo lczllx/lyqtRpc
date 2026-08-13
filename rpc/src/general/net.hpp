@@ -97,6 +97,11 @@ namespace lcz_rpc
             }
             // 检查完整消息是否已到达（peekInt32 返回的是消息体长度）
             int32_t body_len = buf->peekInt32();
+            // 长度字段来自网络，负数非法；负数隐式转 size_t 会与可读字节比较失真，这里显式拒绝
+            if(body_len < 0)
+            {
+               return false;
+            }
             if(body_len > buf->readableSize() - _totalfield_len)
             {
                return false;  // 数据不完整，继续等待
@@ -110,10 +115,17 @@ namespace lcz_rpc
             int32_t total_len=buf->readInt32();
             MsgType msgtype=static_cast<MsgType>(buf->readInt32());
             int32_t id_len=buf->readInt32();
-            int32_t data_len=total_len-_msgidfield_len-_msgtypefield_len-id_len;
-            
-            std::string id=buf->retrieveAsString(id_len);     
-            std::string data=buf->retrieveAsString(data_len);
+            // 长度字段来自网络，必须非负；用 int64 计算 data_len 防溢出，
+            // 否则负数 id_len/data_len 直传 retrieveAsString 会隐式转巨大 size_t 导致越界读。
+            if(total_len < 0 || id_len < 0){return false;}
+            int64_t data_len=static_cast<int64_t>(total_len)
+                              -static_cast<int64_t>(_msgidfield_len)
+                              -static_cast<int64_t>(_msgtypefield_len)
+                              -static_cast<int64_t>(id_len);
+            if(data_len < 0){return false;}
+
+            std::string id=buf->retrieveAsString(static_cast<size_t>(id_len));
+            std::string data=buf->retrieveAsString(static_cast<size_t>(data_len));
             msg=MessageFactory::create(msgtype);
             if(msg.get()==nullptr){LCZ_ERROR("创建消息失败");return false;}
             bool ret=_serializer->decode(data, msg);//通过序列化器反序列化数据
