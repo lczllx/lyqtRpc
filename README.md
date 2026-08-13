@@ -141,6 +141,10 @@ lyqtRpc/
 
 ## Build
 
+Two ways to build — system deps (fast) or vcpkg (zero-setup, cross-platform).
+
+### 1. System deps (apt) — recommended
+
 **Dependencies** (one `apt install`):
 ```bash
 sudo apt-get install -y build-essential cmake g++ make \
@@ -149,14 +153,24 @@ sudo apt-get install -y build-essential cmake g++ make \
   flatbuffers-compiler libflatbuffers-dev    # optional, for SHM FlatBuf path
 ```
 
-**Compile**:
+**Compile** (CMake presets):
 ```bash
-cd lyqtRpc/rpc && mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DLCZ_RPC_BUILD_EXAMPLES=ON
-make -j$(nproc)
+cd lyqtRpc/rpc
+cmake --preset system -B build -DLCZ_RPC_BUILD_EXAMPLES=ON
+cmake --build build -j$(nproc)
 ```
 
-**Unit tests**: `cmake .. -DLCZ_RPC_BUILD_TESTS=ON` with `libgtest-dev` installed, then `./bin/lcz_rpc_unit_tests`.
+**Unit tests**: add `-DLCZ_RPC_BUILD_TESTS=ON` (needs `libgtest-dev`), then run `./build/bin/lcz_rpc_unit_tests`.
+
+### 2. vcpkg (zero apt deps, cross-platform)
+
+```bash
+cd lyqtRpc/rpc
+cmake --preset vcpkg -B build-vcpkg -DLCZ_RPC_BUILD_EXAMPLES=ON
+cmake --build build-vcpkg -j$(nproc)
+```
+
+First build downloads and compiles all deps (protobuf / curl / jsoncpp / flatbuffers / gtest / benchmark / fmt) from source — ~30min. Subsequent builds are cached.
 
 ## Roadmap
 

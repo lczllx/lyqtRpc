@@ -141,6 +141,10 @@ lyqtRpc/
 
 ## 构建
 
+两种方式二选一 —— 系统依赖（快）或 vcpkg（零配置、跨平台）。
+
+### 1. 系统依赖（apt）—— 推荐
+
 **依赖**：（`apt install` 一行搞定）
 ```bash
 sudo apt-get install -y build-essential cmake g++ make \
@@ -149,14 +153,24 @@ sudo apt-get install -y build-essential cmake g++ make \
   flatbuffers-compiler libflatbuffers-dev    # SHM FlatBuf 路径可选
 ```
 
-**编译**：
+**编译**（CMake presets）：
 ```bash
-cd lyqtRpc/rpc && mkdir -p build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release -DLCZ_RPC_BUILD_EXAMPLES=ON
-make -j$(nproc)
+cd lyqtRpc/rpc
+cmake --preset system -B build -DLCZ_RPC_BUILD_EXAMPLES=ON
+cmake --build build -j$(nproc)
 ```
 
-**运行单测**：`cmake .. -DLCZ_RPC_BUILD_TESTS=ON` 且已安装 `libgtest-dev`，构建后 `./bin/lcz_rpc_unit_tests`。
+**运行单测**：加 `-DLCZ_RPC_BUILD_TESTS=ON`（需已安装 `libgtest-dev`），构建后 `./build/bin/lcz_rpc_unit_tests`。
+
+### 2. vcpkg（零 apt 依赖、跨平台）
+
+```bash
+cd lyqtRpc/rpc
+cmake --preset vcpkg -B build-vcpkg -DLCZ_RPC_BUILD_EXAMPLES=ON
+cmake --build build-vcpkg -j$(nproc)
+```
+
+首次构建会从源码下载并编译全部依赖（protobuf / curl / jsoncpp / flatbuffers / gtest / benchmark / fmt），约 30 分钟；后续构建有缓存。
 
 ## 规划
 
