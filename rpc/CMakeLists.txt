@@ -27,6 +27,16 @@ add_compile_definitions(
 
 option(LCZ_RPC_BUILD_EXAMPLES "构建 example 目录中的示例程序" ON)
 option(LCZ_RPC_BUILD_TESTS "构建单元测试（GoogleTest，需系统已安装，如 Ubuntu: libgtest-dev）" OFF)
+option(LCZ_RPC_SANITIZE "启用 AddressSanitizer + UndefinedBehaviorSanitizer（仅测试用，会拖慢 2~5 倍，勿用于生产）" OFF)
+
+# ---- Sanitizers：内存错误 / 未定义行为检测 ----
+# ASan 抓越界/use-after-free/double-free/泄漏；UBSan 抓整数溢出/除零/空指针解引用。
+# 只应在测试阶段开启；生产构建保持 OFF。TSan 因与 ASan 冲突，需单独编译，这里不混入。
+if(LCZ_RPC_SANITIZE)
+    add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined)
+    message(STATUS "Sanitizers: ASan + UBSan 已启用")
+endif()
 
 # jsoncpp：CONFIG（vcpkg）→ MODULE（apt FindJsonCpp.cmake）→ pkg-config → 手动找
 find_package(jsoncpp CONFIG QUIET)

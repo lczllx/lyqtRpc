@@ -221,3 +221,62 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t lcz-rpc:ci .
+
+  # Sanitizer 防线：ASan + UBSan 下跑单元测试，抓越界/use-after-free/未定义行为。
+  # detect_leaks=0 屏蔽全局单例（metrics Registry 的 Meyers 单例）在进程退出时的
+  # 泄漏噪音，只聚焦真正的内存错误；UBSan halt_on_error=1 让未定义行为直接失败。
+  # 只编译核心库 + 单测，不跑 smoke（省时），与 build-and-test 并行。
+  sanitize:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+
+    services:
+      etcd:
+        image: bitnamilegacy/etcd:3.5
+        env:
+          ALLOW_NONE_AUTHENTICATION: "yes"
+          ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+          ETCD_ADVERTISE_CLIENT_URLS: http://0.0.0.0:2379
+        ports:
+          - 2379:2379
+        options: --health-cmd="etcdctl endpoint health" --health-interval=5s --health-timeout=3s --health-retries=5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            pkg-config \
+            g++ \
+            make \
+            libboost-dev \
+            libjsoncpp-dev \
+            libcurl4-openssl-dev \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libflatbuffers-dev \
+            flatbuffers-compiler \
+            libgtest-dev
+
+      - name: Configure CMake (ASan + UBSan)
+        working-directory: rpc
+        run: cmake --preset system -B build-asan -DLCZ_RPC_SANITIZE=ON -DLCZ_RPC_BUILD_TESTS=ON -DLCZ_RPC_BUILD_EXAMPLES=OFF -DLCZ_RPC_BUILD_GATEWAY=OFF
+
+      - name: Build tests with sanitizers
+        working-directory: rpc/build-asan
+        run: cmake --build . -j$(nproc)
+
+      - name: Run unit tests under ASan + UBSan
+        working-directory: rpc/build-asan
+        env:
+          LCZ_ETCD: http://localhost:2379
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ./bin/lcz_rpc_unit_tests
