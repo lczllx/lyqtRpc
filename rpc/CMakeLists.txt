@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON) #编译器必须支持 C++17
 set(CMAKE_CXX_EXTENSIONS OFF)  #不要 GNU 扩展
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer") #perf 采样需要帧指针
+# 上面的 set(CMAKE_CXX_FLAGS) 会被 muduo/CMakeLists.txt 里的 string(REPLACE ... CMAKE_CXX_FLAGS) 覆盖，
+# 导致 muduo 用 -O2 编译（默认 -fomit-frame-pointer），fp 回溯在 muduo 这层断掉、火焰图整段 [unknown]。
+# add_compile_options 走 COMPILE_OPTIONS 目录属性、不被变量覆盖，能穿透到 muduo 子目录。
+add_compile_options(-fno-omit-frame-pointer)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON) #生成 compile_commands.json（给 IDE）
 
 # ---- lyqtrpc_build_info 版本元数据 ----
