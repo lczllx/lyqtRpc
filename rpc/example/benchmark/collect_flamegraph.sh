@@ -2,13 +2,13 @@
 # ============================================================
 # collect_flamegraph.sh — 起服务端 → perf 采样 → 跑压测 → 生成火焰图
 #
-# 用法（在 rpc/build 目录下执行，或给全路径）：
-#   ./collect_flamegraph.sh <名字> <服务端命令...> -- <压测命令...>
+# 用法（在 rpc/build 目录下执行：脚本在 example/benchmark/，二进制在 build/bin/）：
+#   ../example/benchmark/collect_flamegraph.sh <名字> <服务端命令...> -- <压测命令...>
 #
-# 例：
-#   ./collect_flamegraph.sh tcp_proto_small \
+# 例（rpc/build 下）：
+#   ../example/benchmark/collect_flamegraph.sh tcp_proto_small \
 #     ./bin/benchmark_server 8889 0 8080 0 \
-#     -- ./bin/benchmark_client throughput add 0 0 30 0 127.0.0.1 8889 8080 0
+#     -- ./bin/benchmark_client throughput add 0 0 120 0 127.0.0.1 8889 8080 0
 #
 # 前置：
 #   1. 已装 perf：sudo apt-get install -y linux-tools-$(uname -r)
@@ -16,7 +16,7 @@
 #   3. 编译已带 -fno-omit-frame-pointer（rpc/CMakeLists.txt 已开），默认 --call-graph fp 即可；
 #      要内核+libc 一起全解析（无 [unknown]）用 CALL_GRAPH="dwarf,16384"（慢）
 #
-# 输出：bench_result/<名字>.svg（火焰图，浏览器打开可交互缩放）
+# 输出：bench_result/<名字>_<时间戳>.svg（火焰图）+ 同名 .meta（git commit / 采样参数等上下文元数据）
 # ============================================================
 set -euo pipefail
 
@@ -45,6 +45,13 @@ done
 [ ${#CLI[@]} -gt 0 ] || { echo "错误：缺少压测命令（-- 之后）"; exit 1; }
 
 mkdir -p "$OUT_DIR"
+
+# 0. 采集上下文：时间戳 + git 信息，随火焰图一起落盘（before/after 对比要能溯源到 commit）
+TS="$(date +%Y%m%d_%H%M%S)"
+START_EPOCH="$(date +%s)"
+GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+GIT_BRANCH="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+if [ -z "$(git status --porcelain 2>/dev/null)" ]; then GIT_DIRTY=no; else GIT_DIRTY=yes; fi
 
 # 1. 起服务端。用 $! 直接拿服务端二进制 PID —— 别用 $() 捕获，
 #    否则子 shell 退出会连带杀掉后台进程（SHM 踩过这个坑）。
@@ -80,6 +87,33 @@ if [ "${DROP_KERNEL:-0}" = "1" ]; then
     mv "/tmp/perf_${NAME}.filtered" "/tmp/perf_${NAME}.folded"
 fi
 
-"$FG_DIR/flamegraph.pl" "/tmp/perf_${NAME}.folded" > "$OUT_DIR/${NAME}.svg"
+"$FG_DIR/flamegraph.pl" "/tmp/perf_${NAME}.folded" > "$OUT_DIR/${NAME}_${TS}.svg"
 
-echo "✅ $OUT_DIR/${NAME}.svg"
+# 6. 落盘元数据（同名 .meta）：硬件 / git / 采样参数，供 before/after 对比溯源
+END_EPOCH="$(date +%s)"
+DURATION=$((END_EPOCH - START_EPOCH))
+CPU_MODEL="$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2- | xargs || true)"
+PERF_VER="$(perf --version 2>/dev/null | head -1 || true)"
+
+cat > "$OUT_DIR/${NAME}_${TS}.meta" <<EOF
+name: ${NAME}
+timestamp: $(date '+%Y-%m-%d %H:%M:%S')
+duration_sec: ${DURATION}
+git_commit: ${GIT_COMMIT}
+git_branch: ${GIT_BRANCH}
+git_dirty: ${GIT_DIRTY}
+kernel: $(uname -r)
+cpu: ${CPU_MODEL}
+cores: $(nproc)
+perf: ${PERF_VER}
+perf_freq: ${FREQ}
+call_graph: ${CALL_GRAPH}
+drop_kernel: ${DROP_KERNEL:-0}
+server_pid: ${SRV_PID}
+server_cmd: ${SRV[*]}
+client_cmd: ${CLI[*]}
+output: ${OUT_DIR}/${NAME}_${TS}.svg
+EOF
+
+echo "✅ $OUT_DIR/${NAME}_${TS}.svg"
+echo "📋 $OUT_DIR/${NAME}_${TS}.meta"
