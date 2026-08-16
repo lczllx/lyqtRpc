@@ -31,14 +31,14 @@ namespace lcz
         using ptr = std::shared_ptr<AsyncLooper>;
         AsyncLooper(const Functor &func,AsyncType type=lcz::AsyncType::ASYNC_SAFE):_callback(func),_looper_type(type),_stop(false),_thread(std::thread(&AsyncLooper::threadentry,this)){};
         ~AsyncLooper(){stop();}
-        void push(const char*data,size_t len)
+        void push(std::string_view data,size_t len)
         {
             std::unique_lock<std::mutex> lock(_mutex);
            //看是否可以向缓冲区加入数据集
            if(_looper_type==AsyncType::ASYNC_SAFE)
             _cond_pro.wait(lock,[&](){return _stop || len<=_pro_buf.abletowritelen();});
            //将数据放进生产缓冲区
-            _pro_buf.push(data,len);
+            _pro_buf.push(data.data(),len);
            //唤醒消费线程对缓冲区数据进行处理
             _cond_con.notify_one();
 

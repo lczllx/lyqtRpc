@@ -23,17 +23,17 @@ namespace lcz
         std::string _payload; // 日志内容   
         Logmsg(){}
         Logmsg(lcz::LogLevel::value level,
-            const std::string &file,
+            std::string_view file,
             size_t line,
-            const std::string &logger,
-            const std::string &payload)
+            std::string logger,
+            std::string payload)
             :_time(utility::Date::getTime()),
             _level(level),
             _file(file),
             _line(line),
             _tid(std::this_thread::get_id()),
-            _logger(logger),
-            _payload(payload)
+            _logger(std::move(logger)),
+            _payload(std::move(payload))
             {}
     };
 }

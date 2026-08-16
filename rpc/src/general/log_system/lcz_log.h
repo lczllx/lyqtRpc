@@ -11,8 +11,8 @@
 
 namespace lcz {
 
-inline Logger::ptr getLogger(const std::string& name = "root_logger") {
-    Logger::ptr logger = LoggerManager::getInstance().getLogger(name);
+inline Logger::ptr getLogger(const std::string&name = "root_logger") {
+    Logger::ptr logger = LoggerManager::getInstance().getLogger(name.c_str());
     if (logger == nullptr) {
         logger = LoggerManager::getInstance().rootLogger();
     }

@@ -533,8 +533,8 @@ class Logger
 public:
     using ptr = std::shared_ptr<Logger>;
 
-    Logger(const std::string& logger_name, Formatter::ptr formatter, LogLevel::value level, const std::vector<LogSink::ptr>& logsink)
-        : _logger_name(logger_name), _formatter(formatter), _limit_level(level), _logsink(logsink)
+    Logger(std::string logger_name, Formatter::ptr formatter, LogLevel::value level, const std::vector<LogSink::ptr>& logsink)
+        : _logger_name(std::move(logger_name)), _formatter(formatter), _limit_level(level), _logsink(logsink)
     {}
 
     std::vector<LogSink::ptr> getSinks() const {
@@ -551,7 +551,7 @@ public:
         _limit_level.store(level);
     }
 
-    void Debug(const std::string& file, size_t line, const std::string& fmt, ...)
+    void Debug(std::string_view file, size_t line, const std::string& fmt, ...)
     {
         if (LogLevel::value::DEBUG < _limit_level.load()) return;
 
@@ -573,7 +573,7 @@ public:
         free(res);
     }
 
-    void Info(const std::string& file, size_t line, const std::string& fmt, ...)
+    void Info(std::string_view file, size_t line, const std::string& fmt, ...)
     {
         if (LogLevel::value::INFO < _limit_level.load()) return;
 
@@ -595,7 +595,7 @@ public:
         free(res);
     }
 
-    void Warn(const std::string& file, size_t line, const std::string& fmt, ...)
+    void Warn(std::string_view file, size_t line, const std::string& fmt, ...)
     {
         if (LogLevel::value::WARN < _limit_level.load()) return;
 
@@ -617,7 +617,7 @@ public:
         free(res);
     }
 
-    void Error(const std::string& file, size_t line, const std::string& fmt, ...)
+    void Error(std::string_view file, size_t line, const std::string& fmt, ...)
     {
         if (LogLevel::value::ERROR < _limit_level.load()) return;
 
@@ -639,7 +639,7 @@ public:
         free(res);
     }
 
-    void Fatal(const std::string& file, size_t line, const std::string& fmt, ...)
+    void Fatal(std::string_view file, size_t line, const std::string& fmt, ...)
     {
         if (LogLevel::value::FATAL < _limit_level.load()) return;
 

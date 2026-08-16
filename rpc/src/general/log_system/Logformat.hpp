@@ -14,6 +14,7 @@
 #include<vector>
 #include<cassert>
 #include<sstream>
+#include<utility>
 
 namespace lcz
 { 
@@ -45,8 +46,8 @@ namespace lcz
       class TimeFormatItem:public FormatItem
       {
         public:
-        TimeFormatItem(const std::string &fmt="%H:%M:%S")
-            :_time_format(fmt)
+        TimeFormatItem(std::string fmt="%H:%M:%S")
+            :_time_format(std::move(fmt))
             {}
         virtual void format(std::ostream &os,const Logmsg &msg)override
         {
@@ -114,8 +115,8 @@ namespace lcz
       class OtherFormatItem:public FormatItem
       {
         public:
-        OtherFormatItem(const std::string &str)
-            :_str(str)
+        OtherFormatItem(std::string str)
+            :_str(std::move(str))
             {}
          virtual void format(std::ostream &os,const Logmsg &msg)override
         {
@@ -140,8 +141,8 @@ namespace lcz
                         */
         public:
         using ptr=std::shared_ptr<Formatter>;//用于在日志器对格式化模块进行管理
-        Formatter(const std::string &pattern="[%d{%H:%M:%S}][%t][%c][%f:%l][%p]%T%m%n")
-        :_pattern(pattern)
+        Formatter(std::string pattern="[%d{%H:%M:%S}][%t][%c][%f:%l][%p]%T%m%n")
+        :_pattern(std::move(pattern))
         {
             bool ok = parsePattern();
             if (!ok || _items.empty()) {

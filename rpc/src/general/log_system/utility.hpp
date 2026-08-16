@@ -12,7 +12,7 @@
 #include <ctime>
 #include <unistd.h>
 #include <sys/stat.h>
-
+#include <string_view>
 namespace lcz
 {
     namespace utility
@@ -28,7 +28,7 @@ namespace lcz
         class File
         {
         public:
-            static bool isFileexists(const std::string &pathname)
+            static bool isFileexists(const std::string& pathname)
             {
                 // return (access(pathname.c_str(), F_OK) == 0);//不通用，仅限类Unix系统
                 struct stat st;
@@ -39,7 +39,7 @@ namespace lcz
 
                 return true;
             }
-            static std::string path(const std::string &pathname)
+            static std::string path(const std::string& pathname)
             {
                 // pathname = "/home/lcz/abc.txt" 取文件名前面的路径
                 if(pathname.empty()) return ".";
@@ -50,17 +50,17 @@ namespace lcz
                 }
                 return pathname.substr(0, pos + 1); // 包含最后的斜杠
             }
-            static void createDirectory(const std::string &path)
+            static void createDirectory(const std::string& path)
             {
                 if (path.empty()) return;
 
                 // 如果以"./logs/"开头，去掉前缀
-                std::string processed_path = path;
-                const std::string prefix = "./logs/";
-                if (processed_path.find(prefix) == 0) 
-                {
-                    processed_path = processed_path.substr(prefix.length());
-                }
+                 std::string processed_path = path;
+                // const std::string_view prefix = "./logs/";
+                // if (processed_path.find(prefix) == 0) 
+                // {
+                //     processed_path = processed_path.substr(prefix.length());
+                // }
 
                 std::string tmp;
                 size_t len = processed_path.length();
