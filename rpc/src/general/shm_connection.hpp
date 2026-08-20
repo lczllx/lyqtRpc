@@ -14,6 +14,7 @@
 #include "abstract.hpp"
 #include <functional>
 #include <string>
+#include <string_view>
 
 namespace lcz_rpc
 {
@@ -26,7 +27,7 @@ namespace lcz_rpc
 
         // 注入写回调：Server 注入 write_response，Client 注入 send
         void setSender(Sender s) { _sender = std::move(s); }
-        void setName(const std::string &n) { _name = n; }
+        void setName(std::string_view n) { _name = std::string(n); }
 
         // ====== BaseConnection 接口 ======
         // Router 处理完业务调 conn->send(resp)，最终走到 _sender → 写 ring buffer

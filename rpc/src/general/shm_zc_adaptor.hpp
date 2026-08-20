@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <typeinfo>
 #include "./publicconfig.hpp"
 #include "./log_system/lcz_log.h"
@@ -73,7 +74,7 @@ namespace lcz_rpc
     class ShmZcReader
     {
     public:
-        explicit ShmZcReader(const std::string &body)
+        explicit ShmZcReader(std::string_view body)
             : _data(body.data()), _size(body.size()) {}
 
         explicit ShmZcReader(const char *data, size_t size)
