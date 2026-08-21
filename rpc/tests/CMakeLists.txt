@@ -17,6 +17,14 @@
 #   test_shm_channel.cc         ShmChannel 共享内存单进程闭环
 #   test_metrics.cc             Prometheus 指标内存模型（Counter/Gauge/Histogram/导出格式）
 #   test_metrics_server.cc      /metrics HTTP 端点起停 + process_* 采集
+#   test_memory_circuit_store.cc  熔断状态内存存储 save/load/remove
+#   test_async_circuit_store.cc   异步熔断存储：缓存/穿透/刷盘/去重/删除/析构
+#   test_circuit_breaker.cc        NodeBreaker 状态机 + CircuitBreaker 管理/持久化
+#   test_memory_registry_store.cc  Provider 注册/发现/负载/心跳/扫描/断开
+#   test_dispacher.cc              按 MsgType 派发到类型化 handler，未知类型关连接
+#   test_rpc_router.cc             ServiceDescribe/Factory/Manager + JSON/Proto 路由派发
+#   test_rpc_registry.cc           DiscoverManager 通知 + PwithDManager 注册/发现/负载/心跳
+#   test_leader_election.cc        内存模式单实例恒为 leader，start/stop 无副作用
 # =============================================================================
 find_package(GTest REQUIRED CONFIG)
 
@@ -32,6 +40,14 @@ add_executable(lcz_rpc_unit_tests
   test_shm_channel.cc
   test_metrics.cc
   test_metrics_server.cc
+  test_memory_circuit_store.cc
+  test_async_circuit_store.cc
+  test_circuit_breaker.cc
+  test_memory_registry_store.cc
+  test_dispacher.cc
+  test_rpc_router.cc
+  test_rpc_registry.cc
+  test_leader_election.cc
 )
 
 target_include_directories(lcz_rpc_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
