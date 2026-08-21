@@ -1,6 +1,7 @@
 #pragma once
 #include "message.hpp"
 #include <string>
+#include <string_view>
 #include <memory>
 
 namespace lcz_rpc
@@ -15,7 +16,7 @@ namespace lcz_rpc
         // 将消息编码为可在线缆上传输的字节串
         virtual std::string encode(const BaseMessage::ptr &msg) = 0;
         // 从字节串解码为消息对象
-        virtual bool decode(const std::string &data, BaseMessage::ptr &msg) = 0;
+        virtual bool decode(std::string_view data, BaseMessage::ptr &msg) = 0;
         // 序列化器名称，用于日志和调试
         virtual const char *name() const = 0;
 
@@ -30,7 +31,7 @@ namespace lcz_rpc
         {
             return msg->serialize();
         }
-        bool decode(const std::string &data, BaseMessage::ptr &msg) override
+        bool decode(std::string_view data, BaseMessage::ptr &msg) override
         {
             return msg->unserialize(data);
         }

@@ -23,8 +23,8 @@ namespace lcz_rpc
     namespace server
     {
         // 状态变更时保存
-        bool EtcdCircuitStore::save(const std::string &method,
-                                    const std::string &host, const CircuitStatus &status)
+        bool EtcdCircuitStore::save(std::string_view method,
+                                    std::string_view host, const CircuitStatus &status)
         {
             // 用json拼接
             Json::Value v;
@@ -38,8 +38,8 @@ namespace lcz_rpc
         }
 
         // 启动时读加载
-        CircuitStatus EtcdCircuitStore::load(const std::string &method,
-                                             const std::string &host)
+        CircuitStatus EtcdCircuitStore::load(std::string_view method,
+                                             std::string_view host)
         {
             auto kvs = http_get_prefix(key_for(method, host));
             if (kvs.empty())
@@ -60,8 +60,8 @@ namespace lcz_rpc
         }
 
         // provider下线清理
-        bool EtcdCircuitStore::remove(const std::string &method,
-                                      const std::string &host)
+        bool EtcdCircuitStore::remove(std::string_view method,
+                                      std::string_view host)
         {
             return http_delete(key_for(method, host));
         }
@@ -78,9 +78,9 @@ namespace lcz_rpc
         }
 
         // key 构造：/lcz-rpc/v1/circuit-breakers/<method>/<host>
-        std::string EtcdCircuitStore::key_for(const std::string &method, const std::string &host)
+        std::string EtcdCircuitStore::key_for(std::string_view method, std::string_view host)
         {
-            return "/lcz-rpc/v1/circuit-breakers/" + method + "/" + host;
+            return "/lcz-rpc/v1/circuit-breakers/" + std::string(method) + "/" + std::string(host);
         }
         // base64 编解码（etcd REST API 要求 key/value 用 base64 传）
         std::string EtcdCircuitStore::base64_encode(const std::string &s)

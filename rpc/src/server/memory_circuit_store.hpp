@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <memory>
 #include "circuit_store.hpp"
 #include <mutex>
@@ -15,14 +16,14 @@ namespace lcz_rpc
             using ptr = std::shared_ptr<MemoryCircuitStore>;
 
             // 状态变更时保存
-            virtual bool save(const std::string &method,
-                              const std::string &host, const CircuitStatus &status) override;
+            virtual bool save(std::string_view method,
+                              std::string_view host, const CircuitStatus &status) override;
             // 启动时读加载
-            virtual CircuitStatus load(const std::string &method,
-                                       const std::string &host) override;
+            virtual CircuitStatus load(std::string_view method,
+                                       std::string_view host) override;
             // provider下线清理
-            virtual bool remove(const std::string &method,
-                                const std::string &host) override;
+            virtual bool remove(std::string_view method,
+                                std::string_view host) override;
 
             virtual ~MemoryCircuitStore() = default;
             private:

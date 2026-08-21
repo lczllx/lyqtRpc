@@ -148,7 +148,7 @@ namespace lcz_rpc
     // type      — 消息类型，告诉对端反序列化成什么
     // max_retries — ring buffer 满时最多重试几次（consumer 消费后空间释放）
     bool ShmChannel::write_to(ShmRingBuf &ch, char *data_base,
-                              const std::string &body, MsgType type, int max_retries)
+                              std::string_view body, MsgType type, int max_retries)
     {
         // 帧格式：| 4B frame_len | 4B msg_type | body |
         // frame_len = 8 + body_len，不含自身 4B
@@ -282,7 +282,7 @@ namespace lcz_rpc
 
     // ====== 请求方向（Client → Server） ======
     // 委托到 write_to / read_from，走 req_channel
-    bool ShmChannel::write_request(const std::string &body, MsgType type, int max_retries)
+    bool ShmChannel::write_request(std::string_view body, MsgType type, int max_retries)
     {
         LCZ_DEBUG("write_request: body_len=%zu type=%d max_retries=%d",
                   body.size(), static_cast<int>(type), max_retries);
@@ -300,7 +300,7 @@ namespace lcz_rpc
 
     // ====== 响应方向（Server → Client） ======
     // 委托到 write_to / read_from，走 resp_channel
-    bool ShmChannel::write_response(const std::string &body, MsgType type, int max_retries)
+    bool ShmChannel::write_response(std::string_view body, MsgType type, int max_retries)
     {
         LCZ_DEBUG("write_response: body_len=%zu type=%d max_retries=%d",
                   body.size(), static_cast<int>(type), max_retries);
