@@ -4,6 +4,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <thread>
 #include <atomic>
 #include <condition_variable>
@@ -55,6 +56,9 @@ namespace lcz_rpc
             std::mutex _pending_mutex;                               // 保护 _pending 及 _cv
             std::condition_variable _cv;                             // 后台线程等待 / 唤醒
             std::unordered_map<std::string, CircuitStatus> _pending; // 待刷队列，同 key 覆盖即去重
+
+            std::mutex _removed_mutex;                 // 保护 _removed
+            std::unordered_set<std::string> _removed;  // 已删除 key 的 tombstone，抑制在途刷盘
 
             std::thread _worker;                       // 后台刷盘线程
             std::atomic<bool> _running{true};          // 控制 worker 退出

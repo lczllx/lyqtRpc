@@ -56,6 +56,12 @@ namespace lcz_rpc
         {
             std::string key = cacheKey(method, host);
 
+            // 新的写入使旧的删除失效：清除 tombstone，允许本次状态后续刷盘
+            {
+                std::lock_guard<std::mutex> lock(_removed_mutex);
+                _removed.erase(key);
+            }
+
             // 先写本地缓存，后续 load 立即可见最新状态
             {
                 std::lock_guard<std::mutex> lock(_cache_mutex);
@@ -114,6 +120,12 @@ namespace lcz_rpc
                 _pending.erase(key);
             }
 
+            // 打 tombstone：抑制已 swap 进 worker 本地批次、仍在途的刷盘
+            {
+                std::lock_guard<std::mutex> lock(_removed_mutex);
+                _removed.insert(key);
+            }
+
             // 同步删底层 store
             return _underlying->remove(method, host);
         }
@@ -149,11 +161,30 @@ namespace lcz_rpc
 
                     std::string method = key.substr(0, null_pos);
                     std::string host = key.substr(null_pos + 1);
+
+                    // swap 之后该 key 被 remove：跳过本次刷盘；erase 顺带剪枝 tombstone
+                    // （若后续有新的 save 会自行清除 tombstone 并重写）
+                    {
+                        std::lock_guard<std::mutex> lock(_removed_mutex);
+                        if (_removed.erase(key) > 0)
+                            continue;
+                    }
+
                     if (!_underlying->save(method, host, kv.second))
                     {
                         LCZ_WARN("[AsyncCircuitStore] 后台写入失败 method=%s host=%s state=%d",
                                  method.c_str(), host.c_str(), static_cast<int>(kv.second.state));
                     }
+
+                    // 补偿：save 期间若发生 remove（tombstone 重现），撤销刚写入的旧状态，
+                    // 避免已删除的 key 被在途刷盘复活
+                    bool removed_during_save = false;
+                    {
+                        std::lock_guard<std::mutex> lock(_removed_mutex);
+                        removed_during_save = _removed.erase(key) > 0;
+                    }
+                    if (removed_during_save)
+                        _underlying->remove(method, host);
                 }
             }
         }
