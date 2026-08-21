@@ -7,6 +7,7 @@
 #include "registry_store.hpp"
 #include <iostream>
 #include <set>
+#include <string_view>
 
 namespace lcz_rpc
 {
@@ -31,14 +32,14 @@ namespace lcz_rpc
                     :conn(connection),address(host),load(0),
                      lastheartbeat(std::chrono::steady_clock::now()){}
                 // 记录该提供者提供的服务方法
-                void appendmethod(const std::string& method)
+                void appendmethod(std::string_view method)
                 {
                     std::unique_lock<std::mutex> lock(mutex);
-                    methods.emplace_back(method);
+                    methods.emplace_back(std::string(method));
                 }
             };
             // 添加或更新服务提供者
-            void addProvider(const BaseConnection::ptr& conn,const HostInfo& host,const std::string& method,int load)
+            void addProvider(const BaseConnection::ptr& conn,const HostInfo& host,std::string_view method,int load)
             {
                 Provider::ptr provider;
                 {
@@ -51,7 +52,7 @@ namespace lcz_rpc
                     }else{
                         provider=it->second;
                     }
-                    _methodwithproviders[method].insert(provider);
+                    _methodwithproviders[std::string(method)].insert(provider);
                     provider->load=load;
                     provider->lastheartbeat=std::chrono::steady_clock::now();
                 }
@@ -81,11 +82,11 @@ namespace lcz_rpc
                 _connwithp.erase(it);               
             }
             // 获取提供指定方法的主机列表
-            std::vector<HostInfo> methodHost(const std::string& method)
+            std::vector<HostInfo> methodHost(std::string_view method)
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 std::vector<HostInfo>ret;
-                auto it=_methodwithproviders.find(method);
+                auto it=_methodwithproviders.find(std::string(method));
                 if(it==_methodwithproviders.end())return ret;
                 for(auto& provider:it->second)
                 {
@@ -94,10 +95,10 @@ namespace lcz_rpc
                 return ret;
             }
             // 获取提供指定方法的主机详情（含负载）
-            std::vector<HostDetail> methodHostDetails(const std::string& method) {
+            std::vector<HostDetail> methodHostDetails(std::string_view method) {
                 std::unique_lock<std::mutex> lock(_mutex);
                 std::vector<HostDetail> ret;
-                auto it = _methodwithproviders.find(method);
+                auto it = _methodwithproviders.find(std::string(method));
                 if (it == _methodwithproviders.end()) return ret;
                 for (auto &provider : it->second) {
                     HostDetail detail;
@@ -109,12 +110,12 @@ namespace lcz_rpc
                 return ret;
             }
             // 更新指定 method+host 的 provider 负载
-            bool updateProviderLoad(const std::string &method,
+            bool updateProviderLoad(std::string_view method,
                 const HostInfo &host,
                 int load)
             {
                     std::unique_lock<std::mutex>lock(_mutex);
-                    auto it=_methodwithproviders.find(method);
+                    auto it=_methodwithproviders.find(std::string(method));
                     if(it==_methodwithproviders.end()){return false;}
                     for(auto&provider:it->second)
                     {
@@ -127,9 +128,9 @@ namespace lcz_rpc
                     return false;
             }
             // 更新 provider 最后心跳时间
-            bool updateProviderLastHeartbeat(const std::string& method, const HostInfo& host) {
+            bool updateProviderLastHeartbeat(std::string_view method, const HostInfo& host) {
                 std::unique_lock<std::mutex> lock(_mutex);
-                auto it = _methodwithproviders.find(method);
+                auto it = _methodwithproviders.find(std::string(method));
                 if (it == _methodwithproviders.end()) return false;
                 for (auto &p : it->second) {
                     if (p->address == host) {
@@ -187,14 +188,14 @@ namespace lcz_rpc
                 BaseConnection::ptr conn;
                 Discoverer(const BaseConnection::ptr& connection):conn(connection){}
                 // 记录该发现者关注的服务方法
-                void appendmethod(const std::string& method)
+                void appendmethod(std::string_view method)
                 {
                     std::unique_lock<std::mutex> lock(mutex);
-                    methods.emplace_back(method);
+                    methods.emplace_back(std::string(method));
                 }
             };
             // 添加发现者并建立 method->discoverer 映射
-            Discoverer::ptr addDiscoverer(const BaseConnection::ptr& conn,const HostInfo& host,const std::string& method)
+            Discoverer::ptr addDiscoverer(const BaseConnection::ptr& conn,const HostInfo& host,std::string_view method)
             {
                 Discoverer::ptr discoverer;
                 {
@@ -207,7 +208,7 @@ namespace lcz_rpc
                     }else{
                         discoverer=it->second;
                     }
-                    _methodwithdiscoverer[method].insert(discoverer);
+                    _methodwithdiscoverer[std::string(method)].insert(discoverer);
                 }
                     discoverer->appendmethod(method);
                     return discoverer;
@@ -237,21 +238,21 @@ namespace lcz_rpc
                 _connwithd.erase(it);               
             }
             // 向关注该 method 的发现者广播上线通知
-            void onlineNotify(const std::string& method,const HostInfo& host)
+            void onlineNotify(std::string_view method,const HostInfo& host)
             {
                 return notify(method,host,ServiceOpType::ONLINE);
             }
             // 向关注该 method 的发现者广播下线通知
-            void offlineNotify(const std::string& method,const HostInfo& host)
+            void offlineNotify(std::string_view method,const HostInfo& host)
             {
                 return notify(method,host,ServiceOpType::OFFLINE);
             }
             private:
             // 向关注 method 的发现者广播上线/下线通知
-            void notify(const std::string& method,const HostInfo& host,ServiceOpType service_type)
+            void notify(std::string_view method,const HostInfo& host,ServiceOpType service_type)
             {
                 std::unique_lock<std::mutex>lock(_mutex);
-                auto it=_methodwithdiscoverer.find(method);
+                auto it=_methodwithdiscoverer.find(std::string(method));
                 if(it==_methodwithdiscoverer.end()){return ;}
                 auto rpc_msg=MessageFactory::create<ServiceRequest>();
                 rpc_msg->setHost(host);

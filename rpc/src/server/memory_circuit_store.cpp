@@ -7,38 +7,38 @@ namespace lcz_rpc
     namespace server
     {
         // 状态变更时保存
-        bool MemoryCircuitStore::save(const std::string &method,
-                                      const std::string &host, const CircuitStatus &status)
+        bool MemoryCircuitStore::save(std::string_view method,
+                                      std::string_view host, const CircuitStatus &status)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            _method_status[method][host] = status;
+            _method_status[std::string(method)][std::string(host)] = status;
             return true;
         }
 
         // 启动时读加载
-        CircuitStatus MemoryCircuitStore::load(const std::string &method,
-                                               const std::string &host)
+        CircuitStatus MemoryCircuitStore::load(std::string_view method,
+                                               std::string_view host)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            auto it = _method_status.find(method);
+            auto it = _method_status.find(std::string(method));
             if (it == _method_status.end())
                 return CircuitStatus{};
-            auto host_it = it->second.find(host);
+            auto host_it = it->second.find(std::string(host));
             if (host_it == it->second.end())
                 return CircuitStatus{};
             return host_it->second;
         }
 
         // provider下线清理
-        bool MemoryCircuitStore::remove(const std::string &method,
-                                        const std::string &host)
+        bool MemoryCircuitStore::remove(std::string_view method,
+                                        std::string_view host)
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            auto it = _method_status.find(method);
+            auto it = _method_status.find(std::string(method));
             if (it == _method_status.end())
                 return false;
             auto &host_map = it->second;
-            auto host_it = host_map.find(host);
+            auto host_it = host_map.find(std::string(host));
             if (host_it == host_map.end())
                 return false;
 

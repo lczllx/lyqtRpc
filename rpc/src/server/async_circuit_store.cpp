@@ -45,14 +45,14 @@ namespace lcz_rpc
         }
 
         // key 构造：method\0host，\0 分隔避免 "a"+"bc" 和 "ab"+"c" 冲突
-        std::string AsyncCircuitStore::cacheKey(const std::string &method, const std::string &host)
+        std::string AsyncCircuitStore::cacheKey(std::string_view method, std::string_view host)
         {
-            return method + '\0' + host;
+            return std::string(method) + '\0' + std::string(host);
         }
 
         // 状态变更时保存
-        bool AsyncCircuitStore::save(const std::string &method,
-                                     const std::string &host, const CircuitStatus &status)
+        bool AsyncCircuitStore::save(std::string_view method,
+                                     std::string_view host, const CircuitStatus &status)
         {
             std::string key = cacheKey(method, host);
 
@@ -72,8 +72,8 @@ namespace lcz_rpc
         }
 
         // 启动时加载
-        CircuitStatus AsyncCircuitStore::load(const std::string &method,
-                                              const std::string &host)
+        CircuitStatus AsyncCircuitStore::load(std::string_view method,
+                                              std::string_view host)
         {
             std::string key = cacheKey(method, host);
 
@@ -97,8 +97,8 @@ namespace lcz_rpc
         }
 
         // provider 下线清理
-        bool AsyncCircuitStore::remove(const std::string &method,
-                                       const std::string &host)
+        bool AsyncCircuitStore::remove(std::string_view method,
+                                       std::string_view host)
         {
             std::string key = cacheKey(method, host);
 

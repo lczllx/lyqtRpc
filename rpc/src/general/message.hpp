@@ -5,6 +5,7 @@
 #include "publicconfig.hpp"
 #include "log_system/lcz_log.h"
 #include "rpc_envelope.pb.h"
+#include<string_view>
 
 namespace lcz_rpc
 {
@@ -29,7 +30,7 @@ namespace lcz_rpc
             return output;
         }
         // 将字符串反序列化到 _data + _rid
-        virtual bool unserialize(const std::string &msg)override
+        virtual bool unserialize(std::string_view msg)override
         {
             bool ret = JSON::deserialize(msg,_data);
             // _data 可能是非 object（如畸形 JSON 被解析成 Int/Array），
@@ -60,26 +61,26 @@ namespace lcz_rpc
             return _data[KEY_METHOD].asString();
         }
         // 设置方法名
-        void setMethod(const std::string &method)
+        void setMethod(std::string_view method)
         {
-            _data[KEY_METHOD] = method;
+            _data[KEY_METHOD] = std::string(method);
         }
         // 分布式追踪 ID，全链路透传
         std::string trace_id() const
         {
             return _data.get(KEY_TRACE_ID, "").asString();
         }
-        void setTraceId(const std::string &t)
+        void setTraceId(std::string_view t)
         {
-            _data[KEY_TRACE_ID] = t;
+            _data[KEY_TRACE_ID] = std::string(t);
         }
         std::string span_id() const
         {
             return _data.get(KEY_SPAN_ID, "").asString();
         }
-        void setSpanId(const std::string &s)
+        void setSpanId(std::string_view s)
         {
-            _data[KEY_SPAN_ID] = s;
+            _data[KEY_SPAN_ID] = std::string(s);
         }
     };
     // Json 响应消息类：含 rcode、result 字段，用于响应类消息基类
@@ -273,9 +274,9 @@ namespace lcz_rpc
             return _data.get(KEY_TOPIC_SHARD_KEY,"").asString();//安全获取源哈希键
         }
         //设置源哈希键
-        void setShardKey(const std::string &shardKey)
+        void setShardKey(std::string_view shardKey)
         {
-            _data[KEY_TOPIC_SHARD_KEY] = shardKey;
+            _data[KEY_TOPIC_SHARD_KEY] = std::string(shardKey);
         }
         // 获取优先级
         int priority()const
@@ -327,9 +328,9 @@ namespace lcz_rpc
             return _data[KEY_TOPIC_KEY].asString();
         }
         // 设置主题 key
-        void setTopicKey(const std::string &topicKey)
+        void setTopicKey(std::string_view topicKey)
         {
-            _data[KEY_TOPIC_KEY] = topicKey;
+            _data[KEY_TOPIC_KEY] = std::string(topicKey);
         }
         // 获取操作类型
         TopicOpType optype()const
@@ -347,9 +348,9 @@ namespace lcz_rpc
             return _data[KEY_TOPIC_MSG].asString();
         }
         // 设置主题消息内容
-        void setTopicMsg(const std::string &topicMsg)
+        void setTopicMsg(std::string_view topicMsg)
         {
-            _data[KEY_TOPIC_MSG] = topicMsg;
+            _data[KEY_TOPIC_MSG] = std::string(topicMsg);
         }
     };
     // 主题响应消息类：主题操作的结果响应
@@ -484,9 +485,9 @@ namespace lcz_rpc
             return _data[KEY_METHOD].asString();
         }
         // 设置方法名
-        void setMethod(const std::string &method)
+        void setMethod(std::string_view method)
         {
-            _data[KEY_METHOD] = method;
+            _data[KEY_METHOD] = std::string(method);
         }
         // 设置操作类型
         void setOptype(ServiceOpType optype)
@@ -577,9 +578,9 @@ namespace lcz_rpc
             if (!rid().empty()) _envelope.set_id(rid());
             return _envelope.SerializeToArray(buf, size);
         }
-        virtual bool unserialize(const std::string& msg) override
+        virtual bool unserialize(std::string_view msg) override
         {
-            if (!_envelope.ParseFromString(msg)) {
+            if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoRpcRequest::unserialize failed");
                 return false;
             }
@@ -595,13 +596,13 @@ namespace lcz_rpc
             return true;
         }
         std::string method() const { return _envelope.method(); }
-        void setMethod(const std::string& m) { _envelope.set_method(m); }
+        void setMethod(std::string_view m) { _envelope.set_method(m.data(), m.size()); }
         std::string body() const { return _envelope.body(); }
-        void setBody(const std::string& b) { _envelope.set_body(b); }
+        void setBody(std::string_view b) { _envelope.set_body(b.data(), b.size()); }
         std::string trace_id() const { return _envelope.trace_id(); }
-        void setTraceId(const std::string& t) { _envelope.set_trace_id(t); }
+        void setTraceId(std::string_view t) { _envelope.set_trace_id(t.data(), t.size()); }
         std::string span_id() const { return _envelope.span_id(); }
-        void setSpanId(const std::string& s) { _envelope.set_span_id(s); }
+        void setSpanId(std::string_view s) { _envelope.set_span_id(s.data(), s.size()); }
     private:
         mutable lcz_rpc::proto::RpcRequestEnvelope _envelope;
         mutable std::string _serialized;
@@ -621,9 +622,9 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(const std::string& msg) override
+        virtual bool unserialize(std::string_view msg) override
         {
-            if (!_envelope.ParseFromString(msg)) {
+            if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoRpcResponse::unserialize failed");
                 return false;
             }
@@ -642,7 +643,7 @@ namespace lcz_rpc
         RespCode rcode() const { return static_cast<RespCode>(_envelope.rcode()); }
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
         std::string body() const { return _envelope.body(); }
-        void setBody(const std::string& b) { _envelope.set_body(b); }
+        void setBody(std::string_view b) { _envelope.set_body(b.data(), b.size()); }
         // 服务端过载时建议退避毫秒数，0 表示未设置（非序列化，仅内存传递）
         int64_t retryAfterMs() const { return _retry_after_ms; }
         void setRetryAfterMs(int64_t ms) { _retry_after_ms = ms; }
@@ -665,9 +666,9 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(const std::string& msg) override
+        virtual bool unserialize(std::string_view msg) override
         {
-            if (!_envelope.ParseFromString(msg)) {
+            if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoTopicRequest::unserialize failed");
                 return false;
             }
@@ -706,19 +707,19 @@ namespace lcz_rpc
             return true;
         }
         std::string method() const { return _envelope.method(); }
-        void setMethod(const std::string& m) { _envelope.set_method(m); }
+        void setMethod(std::string_view m) { _envelope.set_method(m.data(), m.size()); }
         std::string topicKey() const { return _envelope.topic_key(); }
-        void setTopicKey(const std::string& k) { _envelope.set_topic_key(k); }
+        void setTopicKey(std::string_view k) { _envelope.set_topic_key(k.data(), k.size()); }
         TopicOpType optype() const { return static_cast<TopicOpType>(_envelope.optype()); }
         void setOptype(TopicOpType o) { _envelope.set_optype(static_cast<int32_t>(o)); }
         std::string topicMsg() const { return _envelope.topic_msg(); }
-        void setTopicMsg(const std::string& m) { _envelope.set_topic_msg(m); }
+        void setTopicMsg(std::string_view m) { _envelope.set_topic_msg(m.data(), m.size()); }
         TopicForwardStrategy forwardStrategy() const { return static_cast<TopicForwardStrategy>(_envelope.forward_strategy()); }
         void setForwardStrategy(TopicForwardStrategy s) { _envelope.set_forward_strategy(static_cast<int32_t>(s)); }
         int fanoutLimit() const { return _envelope.fanout(); }
         void setFanoutLimit(int v) { _envelope.set_fanout(v); }
         std::string shardKey() const { return _envelope.shard_key(); }
-        void setShardKey(const std::string& k) { _envelope.set_shard_key(k); }
+        void setShardKey(std::string_view k) { _envelope.set_shard_key(k.data(), k.size()); }
         int priority() const { return _envelope.priority(); }
         void setPriority(int v) { _envelope.set_priority(v); }
         std::vector<std::string> tags() const
@@ -752,9 +753,9 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(const std::string& msg) override
+        virtual bool unserialize(std::string_view msg) override
         {
-            if (!_envelope.ParseFromString(msg)) {
+            if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoTopicResponse::unserialize failed");
                 return false;
             }
@@ -764,7 +765,7 @@ namespace lcz_rpc
         RespCode rcode() const { return static_cast<RespCode>(_envelope.rcode()); }
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
         std::string result() const { return _envelope.result(); }
-        void setResult(const std::string& r) { _envelope.set_result(r); }
+        void setResult(std::string_view r) { _envelope.set_result(r.data(), r.size()); }
     private:
         lcz_rpc::proto::TopicResponseEnvelope _envelope; // protobuf 主题响应包体，包含 rcode + result
         std::string _serialized;                           // 预序列化缓存，避免重复序列化
@@ -783,9 +784,9 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(const std::string& msg) override
+        virtual bool unserialize(std::string_view msg) override
         {
-            if (!_envelope.ParseFromString(msg)) {
+            if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoServiceRequest::unserialize failed");
                 return false;
             }
@@ -810,7 +811,7 @@ namespace lcz_rpc
             return true;
         }
         std::string method() const { return _envelope.method(); }
-        void setMethod(const std::string& m) { _envelope.set_method(m); }
+        void setMethod(std::string_view m) { _envelope.set_method(m.data(), m.size()); }
         ServiceOpType optype() const { return static_cast<ServiceOpType>(_envelope.optype()); }
         void setOptype(ServiceOpType o) { _envelope.set_optype(static_cast<int32_t>(o)); }
         HostInfo host() const { return std::make_pair(_envelope.host_ip(), _envelope.host_port()); }
@@ -822,7 +823,7 @@ namespace lcz_rpc
         int load() const { return _envelope.load(); }
         void setLoad(int v) { _envelope.set_load(v); }
         std::string trace_id() const { return _envelope.trace_id(); }
-        void setTraceId(const std::string& t) { _envelope.set_trace_id(t); }
+        void setTraceId(std::string_view t) { _envelope.set_trace_id(t.data(), t.size()); }
     private:
         lcz_rpc::proto::ServiceRequestEnvelope _envelope; // protobuf 服务请求包体
         std::string _serialized;                           // 预序列化缓存，避免重复序列化
@@ -841,9 +842,9 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(const std::string& msg) override
+        virtual bool unserialize(std::string_view msg) override
         {
-            if (!_envelope.ParseFromString(msg)) {
+            if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoServiceResponse::unserialize failed");
                 return false;
             }
@@ -862,7 +863,7 @@ namespace lcz_rpc
         RespCode rcode() const { return static_cast<RespCode>(_envelope.rcode()); }
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
         std::string method() const { return _envelope.method(); }
-        void setMethod(const std::string& m) { _envelope.set_method(m); }
+        void setMethod(std::string_view m) { _envelope.set_method(m.data(), m.size()); }
         ServiceOpType optype() const { return static_cast<ServiceOpType>(_envelope.optype()); }
         void setOptype(ServiceOpType o) { _envelope.set_optype(static_cast<int32_t>(o)); }
         std::vector<HostInfo> hosts() const
