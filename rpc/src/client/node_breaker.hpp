@@ -5,6 +5,9 @@
 #include "server/circuit_store.hpp"
 #include <chrono>
 #include <mutex>
+#include <ctime>
+#include <algorithm>
+#include <cstdint>
 namespace lcz_rpc
 {
     namespace client
@@ -32,7 +35,20 @@ namespace lcz_rpc
 
             // 构造时传入配置，可选初始状态用于 etcd 恢复
             explicit NodeBreaker(const CircuitConfig &cfg) : _cfg(cfg) {}
-            void loadStatus(const CircuitStatus &s) { _status = s; }
+            void loadStatus(const CircuitStatus &s)
+            {
+                _status = s;
+                // 恢复 OPEN 的冷却起点：_opened_since 是运行时 steady_clock，重启即丢。
+                // 若不恢复，_opened_since 停留在 epoch，allowRequest 会误判冷却期已过，
+                // 首次请求就把 OPEN 降级成 HALF_OPEN，绕过冷却期。
+                if (_status.state == CircuitState::OPEN)
+                {
+                    auto now = std::chrono::steady_clock::now();
+                    int64_t wall_now = static_cast<int64_t>(std::time(nullptr));
+                    auto ago = std::chrono::seconds(std::max<int64_t>(0, wall_now - _status.opened_at));
+                    _opened_since = now - ago;
+                }
+            }
             void setIdentity(const std::string& method, const std::string& host)
                 { _method = method; _host = host; }
 
