@@ -5,7 +5,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <string_view>
 #include <memory>
 #include <jsoncpp/json/json.h>
 #include <chrono>
@@ -37,7 +36,7 @@ class JSON{
 
     }
     //字符串->json对象 data-反序列化后的json对象 input需要反序列化的字符串
-    static bool deserialize(std::string_view input, Json::Value &data)
+    static bool deserialize(const std::string &input, Json::Value &data)
     {
         // jsoncpp 对畸形输入（内嵌 NUL、类型错位等）可能抛 Json::LogicError/RuntimeError，
         // 而非仅返回 false，故必须 try-catch 兜底，否则异常会穿透到协议层导致进程 terminate。
@@ -46,7 +45,7 @@ class JSON{
             Json::CharReaderBuilder crb;
             std::string errs;
             std::unique_ptr<Json::CharReader> cr(crb.newCharReader());
-            bool ret=cr->parse(input.data(),input.data()+input.size(),&data,&errs);
+            bool ret=cr->parse(input.c_str(),input.c_str()+input.size(),&data,&errs);
             if (!ret)
             {
                 LCZ_ERROR("DeSerialize failed!,%s",errs.c_str());

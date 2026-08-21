@@ -11,27 +11,27 @@ namespace lcz_rpc
         void MemoryRegistryStore::registerInstance(
             const BaseConnection::ptr &conn,
             const ::lcz_rpc::HostInfo &host,
-            std::string_view method,
+            const std::string &method,
             int load) {
                 _provider_maneger->addProvider(conn,host,method,load);
         }
 
-        std::vector<::lcz_rpc::HostInfo> MemoryRegistryStore::methodHost(std::string_view method) {
+        std::vector<::lcz_rpc::HostInfo> MemoryRegistryStore::methodHost(const std::string &method) {
             return _provider_maneger->methodHost(method);
         }
-        std::vector<::lcz_rpc::HostDetail> MemoryRegistryStore::methodHostDetails(std::string_view method) {
+        std::vector<::lcz_rpc::HostDetail> MemoryRegistryStore::methodHostDetails(const std::string &method) {
             return _provider_maneger->methodHostDetails(method);
         }
 
         bool MemoryRegistryStore::reportLoad(
-            std::string_view method,
+            const std::string &method,
             const ::lcz_rpc::HostInfo &host,
             int load) {
                 return _provider_maneger->updateProviderLoad(method,host,load);
         }
 
         bool MemoryRegistryStore::heartbeat(
-            std::string_view method,
+            const std::string &method,
             const ::lcz_rpc::HostInfo &host) {
                 return _provider_maneger->updateProviderLastHeartbeat(method,host);
         }

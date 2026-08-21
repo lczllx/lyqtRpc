@@ -2,7 +2,6 @@
 #include "./registry_store.hpp"
 #include "rpc_registry.hpp"
 #include <chrono>
-#include <string_view>
 
 namespace lcz_rpc
 {
@@ -22,19 +21,19 @@ namespace lcz_rpc
             void registerInstance(
                 const BaseConnection::ptr &conn,
                 const ::lcz_rpc::HostInfo &host,
-                std::string_view method,
+                const std::string &method,
                 int load) override;
 
-            std::vector<::lcz_rpc::HostInfo> methodHost(std::string_view method) override;
-            std::vector<::lcz_rpc::HostDetail> methodHostDetails(std::string_view method) override;
+            std::vector<::lcz_rpc::HostInfo> methodHost(const std::string &method) override;
+            std::vector<::lcz_rpc::HostDetail> methodHostDetails(const std::string &method) override;
 
             bool reportLoad(
-                std::string_view method,
+                const std::string &method,
                 const ::lcz_rpc::HostInfo &host,
                 int load) override;
 
             bool heartbeat(
-                std::string_view method,
+                const std::string &method,
                 const ::lcz_rpc::HostInfo &host) override;
 
             std::vector<std::pair<std::string, ::lcz_rpc::HostInfo>> disconnectProvider(

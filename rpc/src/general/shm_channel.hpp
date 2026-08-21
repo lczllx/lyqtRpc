@@ -18,7 +18,6 @@
 #include <cassert>       // static_assert
 #include <new>           // placement new
 #include <string>        // std::string
-#include <string_view>   // std::string_view
 #include <memory>        // std::shared_ptr
 
 #include "abstract.hpp"
@@ -70,11 +69,11 @@ namespace lcz_rpc
         //   shm_open → fstat → mmap → while(!ready.load(acquire)) pause
 
         // ====== 请求方向（Client → Server） ======
-        bool write_request(std::string_view body, MsgType type, int max_retries = 3);
+        bool write_request(const std::string &body, MsgType type, int max_retries = 3);
         bool read_request(std::string &body, MsgType &type);
 
         // ====== 响应方向（Server → Client） ======
-        bool write_response(std::string_view body, MsgType type, int max_retries = 3);
+        bool write_response(const std::string &body, MsgType type, int max_retries = 3);
         bool read_response(std::string &body, MsgType &type);
 
         // ====== 初始化握手（单客户端模式，保留向后兼容） ======
@@ -125,7 +124,7 @@ namespace lcz_rpc
     private:
         // 内部读写，被四个公开方法委托
         bool write_to(ShmRingBuf &ch, char *data_base,
-                      std::string_view body, MsgType type, int max_retries);
+                      const std::string &body, MsgType type, int max_retries);
         bool read_from(ShmRingBuf &ch, char *data_base,
                        std::string &body, MsgType &type);
 
