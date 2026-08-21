@@ -37,9 +37,9 @@ namespace lcz_rpc
         }
 
         // key 构造：/lcz-rpc/v1/providers/<method>/<ip>:<port>
-        std::string EtcdRegistryStore::key_for(std::string_view method, const HostInfo &host)
+        std::string EtcdRegistryStore::key_for(const std::string &method, const HostInfo &host)
         {
-            return "/lcz-rpc/v1/providers/" + std::string(method) + "/" + host.first + ":" +
+            return "/lcz-rpc/v1/providers/" + method + "/" + host.first + ":" +
                    std::to_string(host.second);
         }
         // base64 编解码（etcd REST API 要求 key/value 用 base64 传）
@@ -221,7 +221,7 @@ namespace lcz_rpc
         void EtcdRegistryStore::registerInstance(
             const BaseConnection::ptr &conn,
             const ::lcz_rpc::HostInfo &host,
-            std::string_view method,
+            const std::string &method,
             int load)
         {
             int64_t lease_id = http_lease_grant(15); // 15s TTL
@@ -254,9 +254,9 @@ namespace lcz_rpc
             return !resp.empty();
         }
 
-        std::vector<::lcz_rpc::HostInfo> EtcdRegistryStore::methodHost(std::string_view method)
+        std::vector<::lcz_rpc::HostInfo> EtcdRegistryStore::methodHost(const std::string &method)
         {
-            std::string prefix = "/lcz-rpc/v1/providers/" + std::string(method) + "/";
+            std::string prefix = "/lcz-rpc/v1/providers/" + method + "/";
             auto kvs = http_get_prefix(prefix);
             std::vector<::lcz_rpc::HostInfo> hosts;
             for (const auto &kv : kvs)
@@ -267,9 +267,9 @@ namespace lcz_rpc
             }
             return hosts;
         }
-        std::vector<::lcz_rpc::HostDetail> EtcdRegistryStore::methodHostDetails(std::string_view method)
+        std::vector<::lcz_rpc::HostDetail> EtcdRegistryStore::methodHostDetails(const std::string &method)
         {
-            std::string prefix = "/lcz-rpc/v1/providers/" + std::string(method) + "/";
+            std::string prefix = "/lcz-rpc/v1/providers/" + method + "/";
             auto kvs = http_get_prefix(prefix);
             std::vector<::lcz_rpc::HostDetail> details;
             for (const auto &kv : kvs)
@@ -283,7 +283,7 @@ namespace lcz_rpc
         }
 
         bool EtcdRegistryStore::reportLoad(
-            std::string_view method,
+            const std::string &method,
             const ::lcz_rpc::HostInfo &host,
             int load)
         {
@@ -311,7 +311,7 @@ namespace lcz_rpc
         }
 
         bool EtcdRegistryStore::heartbeat(
-            std::string_view method,
+            const std::string &method,
             const ::lcz_rpc::HostInfo &host)
         {
             std::string key = key_for(method, host);

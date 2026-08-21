@@ -1,6 +1,5 @@
 #pragma once
 #include <string>
-#include <string_view>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -32,19 +31,19 @@ namespace lcz_rpc
             AsyncCircuitStore &operator=(const AsyncCircuitStore &) = delete;
 
             // 状态变更时保存：先写本地缓存（调用线程，O(1)），异步入队等后台刷盘
-            bool save(std::string_view method,
-                      std::string_view host, const CircuitStatus &status) override;
+            bool save(const std::string &method,
+                      const std::string &host, const CircuitStatus &status) override;
 
             // 启动时加载：本地缓存命中直接返回，穿透到底层 store 后回填
-            CircuitStatus load(std::string_view method,
-                               std::string_view host) override;
+            CircuitStatus load(const std::string &method,
+                               const std::string &host) override;
 
             // provider 下线清理：同步删底层 + 清本地缓存 + 取消待刷队列中对应 key
-            bool remove(std::string_view method,
-                        std::string_view host) override;
+            bool remove(const std::string &method,
+                        const std::string &host) override;
 
         private:
-            static std::string cacheKey(std::string_view method, std::string_view host);
+            static std::string cacheKey(const std::string &method, const std::string &host);
             void workerLoop();
 
             ICircuitStateStore::ptr _underlying; // 底层持久化 store（EtcdCircuitStore 或 MemoryCircuitStore）
