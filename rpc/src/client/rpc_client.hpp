@@ -241,7 +241,7 @@ namespace lcz_rpc
                 _loadbalance_strategy = strategy;
             }
             // 同步 RPC 调用
-            bool call(const std::string &method_name, const Json::Value &params, Json::Value &result)
+            [[nodiscard]] bool call(const std::string &method_name, const Json::Value &params, Json::Value &result)
             {
                 BaseClient::ptr client = getClient(method_name);
                 if (client.get() == nullptr)
@@ -252,7 +252,7 @@ namespace lcz_rpc
                 return _caller->call(client->connection(), method_name, params, result);
             }
             // 异步 RPC 调用，通过 future 获取结果
-            bool call(const std::string &method_name, Json::Value &params, RpcCaller::RpcAsyncRespose &result)
+            [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, RpcCaller::RpcAsyncRespose &result)
             {
                 BaseClient::ptr client = getClient(method_name);
                 if (client.get() == nullptr)
@@ -263,7 +263,7 @@ namespace lcz_rpc
                 return _caller->call(client->connection(), method_name, params, result);
             }
             // 回调式 RPC 调用
-            bool call(const std::string &method_name, Json::Value &params, const RpcCaller::ResponseCallback &cb)
+            [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, const RpcCaller::ResponseCallback &cb)
             {
                 BaseClient::ptr client = getClient(method_name);
                 if (client.get() == nullptr)
@@ -275,7 +275,7 @@ namespace lcz_rpc
             }
             // 纯 Proto RPC 调用（含 Prometheus 客户端指标）
             template<typename Req, typename Resp>
-            bool call_proto(const std::string &method_name, const Req &req, Resp *resp,
+            [[nodiscard]] bool call_proto(const std::string &method_name, const Req &req, Resp *resp,
                            std::chrono::milliseconds timeout = std::chrono::seconds(5))
             {
                 BaseClient::ptr client = getClient(method_name);
