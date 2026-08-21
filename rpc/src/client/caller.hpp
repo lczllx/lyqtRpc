@@ -24,7 +24,7 @@ namespace lcz_rpc
                 : _requestor(reqtor), _breaker(std::move(breaker)) {}
 
             // 同步 RPC：阻塞等待响应，结果写入 result
-            bool call(const BaseConnection::ptr &conn, const std::string &method_name, const Json::Value &params, Json::Value &result)
+            [[nodiscard]] bool call(const BaseConnection::ptr &conn, const std::string &method_name, const Json::Value &params, Json::Value &result)
             {
                 LCZ_DEBUG("RpcCaller sync call method=%s", method_name.c_str());
                 std::string host = conn->peerAddress();
@@ -70,7 +70,7 @@ namespace lcz_rpc
                 return true;
             }
             // 异步 RPC：通过 result future 获取结果
-            bool call(const BaseConnection::ptr &conn, const std::string &method_name, Json::Value &params, RpcAsyncRespose &result)
+            [[nodiscard]] bool call(const BaseConnection::ptr &conn, const std::string &method_name, Json::Value &params, RpcAsyncRespose &result)
             {
                 LCZ_DEBUG("RpcCaller future call method=%s", method_name.c_str());
 
@@ -105,7 +105,7 @@ namespace lcz_rpc
                 return true;
             }
             // 回调式 RPC：响应到达时调用 cb
-            bool call(const BaseConnection::ptr &conn, const std::string &method_name, Json::Value &params, const ResponseCallback &cb)
+            [[nodiscard]] bool call(const BaseConnection::ptr &conn, const std::string &method_name, Json::Value &params, const ResponseCallback &cb)
             {
                 LCZ_DEBUG("RpcCaller callback call method=%s", method_name.c_str());
 
@@ -190,7 +190,7 @@ namespace lcz_rpc
             // 同步 call_proto：Req/Resp 为 protobuf 类型，线缆为二进制，零 JSON
             // error_code 传出参数：成功时写空串；失败时写可读错误分类名(send_failed / backoff / remote_TIMEOUT ...)
             template <typename Req, typename Resp>
-            bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
+            [[nodiscard]] bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, Resp *resp,
                             std::chrono::milliseconds timeout = std::chrono::seconds(5),
                             std::string *error_code = nullptr) // 默认5s超时，平衡慢请求与快速失败
@@ -297,7 +297,7 @@ namespace lcz_rpc
 
             // 异步 call_proto：通过 future<Resp> 获取结果（Resp 需默认构造）
             template <typename Req, typename Resp>
-            bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
+            [[nodiscard]] bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, std::future<Resp> *out_future,
                             std::chrono::milliseconds timeout = std::chrono::seconds(5)) // 默认5s超时，平衡慢请求与快速失败
             {
@@ -360,7 +360,7 @@ namespace lcz_rpc
 
             // 回调式 call_proto
             template <typename Req, typename Resp>
-            bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
+            [[nodiscard]] bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, std::function<void(const Resp &)> on_success,
                             std::function<void(RespCode)> on_error = nullptr)
             {

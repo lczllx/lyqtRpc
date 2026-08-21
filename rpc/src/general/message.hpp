@@ -30,7 +30,7 @@ namespace lcz_rpc
             return output;
         }
         // 将字符串反序列化到 _data + _rid
-        virtual bool unserialize(std::string_view msg)override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg)override
         {
             bool ret = JSON::deserialize(msg,_data);
             // _data 可能是非 object（如畸形 JSON 被解析成 Int/Array），
@@ -40,7 +40,7 @@ namespace lcz_rpc
             return ret;
         }
         // JsonMessage 不额外校验，默认合法
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {
             return true;
         }
@@ -89,7 +89,7 @@ namespace lcz_rpc
         public:
         using ptr = std::shared_ptr<JsonResponse>; 
         // 检查响应码等字段是否有效
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {
            if(!_data.isMember(KEY_RCODE))
            {
@@ -141,7 +141,7 @@ namespace lcz_rpc
         public:
         using ptr = std::shared_ptr<RpcRequest>;  
         // 校验 method 和 params 字段
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {
             //长度 消息类型 id长度 id data
             //     Rpcrequest
@@ -176,7 +176,7 @@ namespace lcz_rpc
         public:
         using ptr = std::shared_ptr<RpcResponse>; 
         // 校验 rcode 和 result 字段
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {
             //对于响应消息，响应码不能为空，结果不能为空
             if(_data[KEY_RCODE].isIntegral()==false||
@@ -200,7 +200,7 @@ namespace lcz_rpc
         using ptr = std::shared_ptr<TopicRequest>;
         // 按转发策略校验对应字段：
         // FANOUT→fanoutLimit>0, SOURCE_HASH→shardKey非空, PRIORITY→priority>0||tags非空, REDUNDANT→redundantCount>1
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {           
             if(_data[KEY_TOPIC_KEY].isString()==false||
             _data[KEY_TOPIC_KEY].isNull())
@@ -384,7 +384,7 @@ namespace lcz_rpc
         {
             _data[KEY_LOAD] = load;
         }
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {
            
             //对于服务请求，方法名不能为空，操作类型不能为空，主机信息不能为空
@@ -451,7 +451,7 @@ namespace lcz_rpc
         public: 
         using ptr = std::shared_ptr<ServiceResponse>;  
         // 校验 rcode、optype 等字段
-        virtual bool check()override
+        [[nodiscard]] virtual bool check()override
         {
             if(_data[KEY_RCODE].isIntegral()==false||
             _data[KEY_RCODE].isNull())
@@ -578,7 +578,7 @@ namespace lcz_rpc
             if (!rid().empty()) _envelope.set_id(rid());
             return _envelope.SerializeToArray(buf, size);
         }
-        virtual bool unserialize(std::string_view msg) override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
             if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoRpcRequest::unserialize failed");
@@ -587,7 +587,7 @@ namespace lcz_rpc
             if (!_envelope.id().empty()) setId(_envelope.id());
             return true;
         }
-        virtual bool check() override
+        [[nodiscard]] virtual bool check() override
         {
             if (_envelope.method().empty()) {
                 LCZ_ERROR("ProtoRpcRequest: method empty");
@@ -622,7 +622,7 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(std::string_view msg) override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
             if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoRpcResponse::unserialize failed");
@@ -631,7 +631,7 @@ namespace lcz_rpc
             if (!_envelope.id().empty()) setId(_envelope.id());
             return true;
         }
-        virtual bool check() override { return true; }
+        [[nodiscard]] virtual bool check() override { return true; }
         size_t byteSize() {
             if (!rid().empty()) _envelope.set_id(rid());
             return _envelope.ByteSizeLong();
@@ -666,7 +666,7 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(std::string_view msg) override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
             if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoTopicRequest::unserialize failed");
@@ -674,7 +674,7 @@ namespace lcz_rpc
             }
             return true;
         }
-        virtual bool check() override
+        [[nodiscard]] virtual bool check() override
         {
             if (_envelope.topic_key().empty()) {
                 LCZ_ERROR("主题键不是字符串或为空!");
@@ -753,7 +753,7 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(std::string_view msg) override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
             if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoTopicResponse::unserialize failed");
@@ -761,7 +761,7 @@ namespace lcz_rpc
             }
             return true;
         }
-        virtual bool check() override { return true; }
+        [[nodiscard]] virtual bool check() override { return true; }
         RespCode rcode() const { return static_cast<RespCode>(_envelope.rcode()); }
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
         std::string result() const { return _envelope.result(); }
@@ -784,7 +784,7 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(std::string_view msg) override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
             if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoServiceRequest::unserialize failed");
@@ -792,7 +792,7 @@ namespace lcz_rpc
             }
             return true;
         }
-        virtual bool check() override
+        [[nodiscard]] virtual bool check() override
         {
             if (_envelope.method().empty()) {
                 LCZ_ERROR("Method is not string or null!");
@@ -842,7 +842,7 @@ namespace lcz_rpc
             }
             return _serialized;
         }
-        virtual bool unserialize(std::string_view msg) override
+        [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
             if (!_envelope.ParseFromArray(msg.data(), static_cast<int>(msg.size()))) {
                 LCZ_ERROR("ProtoServiceResponse::unserialize failed");
@@ -850,7 +850,7 @@ namespace lcz_rpc
             }
             return true;
         }
-        virtual bool check() override
+        [[nodiscard]] virtual bool check() override
         {
             if (static_cast<ServiceOpType>(_envelope.optype()) == ServiceOpType::DISCOVER) {
                 if (_envelope.method().empty() || _envelope.host_size() == 0) {
