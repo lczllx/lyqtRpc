@@ -25,6 +25,7 @@
 #include <sstream>
 #include <iomanip>
 #include <utility>
+#include <string_view>
 
 namespace lcz_rpc
 {
@@ -52,11 +53,11 @@ namespace lcz_rpc
         // 向已格式化的 labels 串追加一个标签（histogram 导出 le 桶时用）:
         // {a="1"} + le="2" → {a="1",le="2"}；原 labels 为空时 → {le="2"}
         // 若无此合并，输出会变成非法的 {a="1"}{le="2"} 两组大括号
-        inline std::string mergeLabels(const std::string &existing, const std::string &extraKV)
+        inline std::string mergeLabels(std::string_view existing, std::string_view extraKV)
         {
             if (existing.empty() || existing == "{}")
-                return "{" + extraKV + "}";
-            return existing.substr(0, existing.size() - 1) + "," + extraKV + "}";
+                return "{" + std::string(extraKV) + "}";
+            return std::string(existing.substr(0, existing.size() - 1)) + "," + std::string(extraKV) + "}";
         }
 
         // ====== Counter：只增计数器（请求总数/错误总数）======
@@ -68,7 +69,7 @@ namespace lcz_rpc
             std::atomic<int64_t> _value{0};    // 唯一会变的状态
 
         public:
-            Counter(const std::string &name, const std::string &help, const Labels &ls = {})
+            Counter(std::string_view name, std::string_view help, const Labels &ls = {})
                 : _name(name), _help(help), _labels(formatLabels(ls)) {}
             void inc() { _value.fetch_add(1, std::memory_order_relaxed); }
             void add(int64_t n) { _value.fetch_add(n, std::memory_order_relaxed); }
@@ -87,7 +88,7 @@ namespace lcz_rpc
             std::atomic<double> _value{0.0}; // 用 double 以兼容令牌数等小数值
 
         public:
-            Gauge(const std::string &name, const std::string &help, const Labels &ls = {})
+            Gauge(std::string_view name, std::string_view help, const Labels &ls = {})
                 : _name(name), _help(help), _labels(formatLabels(ls)) {}
             void set(double v) { _value.store(v, std::memory_order_relaxed); }
             // CAS 失败说明有并发写，o 已被更新为最新值，重试即可
@@ -124,7 +125,7 @@ namespace lcz_rpc
             std::atomic<int64_t> _b[N];     // 各桶命中数（非累计）
 
         public:
-            Histogram(const std::string &name, const std::string &help, const Labels &ls = {})
+            Histogram(std::string_view name, std::string_view help, const Labels &ls = {})
                 : _name(name), _help(help), _labels(formatLabels(ls))
             {
                 for (size_t i = 0; i < N; ++i)
@@ -175,27 +176,27 @@ namespace lcz_rpc
             }
 
             // 获取（或首次创建）一个 Counter；gauge/histogram 同理
-            Counter &counter(const std::string &name, const std::string &help, const Labels &ls = {})
+            Counter &counter(std::string_view name, std::string_view help, const Labels &ls = {})
             {
-                std::string key = name + formatLabels(ls);
+                std::string key = std::string(name) + formatLabels(ls);
                 std::lock_guard<std::mutex> lk(_m);
                 auto *&p = _counters[key]; // 指针的引用：不存在时 operator[] 插入 nullptr
                 if (!p)
                     p = new Counter(name, help, ls); // 故意不 delete：进程级生命周期
                 return *p;
             }
-            Gauge &gauge(const std::string &name, const std::string &help, const Labels &ls = {})
+            Gauge &gauge(std::string_view name, std::string_view help, const Labels &ls = {})
             {
-                std::string key = name + formatLabels(ls);
+                std::string key = std::string(name) + formatLabels(ls);
                 std::lock_guard<std::mutex> lk(_m);
                 auto *&p = _gauges[key];
                 if (!p)
                     p = new Gauge(name, help, ls);
                 return *p;
             }
-            Histogram &histogram(const std::string &name, const std::string &help, const Labels &ls = {})
+            Histogram &histogram(std::string_view name, std::string_view help, const Labels &ls = {})
             {
-                std::string key = name + formatLabels(ls);
+                std::string key = std::string(name) + formatLabels(ls);
                 std::lock_guard<std::mutex> lk(_m);
                 auto *&p = _hists[key];
                 if (!p)

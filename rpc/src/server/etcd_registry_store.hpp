@@ -3,6 +3,7 @@
 #include "rpc_registry.hpp"
 #include "curl/curl.h"
 #include <chrono>
+#include <string_view>
 
 // 通过底层libcurl 通过http调用etcd客户端
 namespace lcz_rpc
@@ -20,7 +21,7 @@ namespace lcz_rpc
             EtcdRegistryStore &operator=(const EtcdRegistryStore &) = delete;
 
             // key 构造：/lcz-rpc/v1/providers/<method>/<ip>:<port>
-            std::string key_for(const std::string &method, const HostInfo &host);
+            std::string key_for(std::string_view method, const HostInfo &host);
             // base64 编解码（etcd REST API 要求 key/value 用 base64 传）
             static std::string base64_encode(const std::string &s);
             static std::string base64_decode(const std::string &s);
@@ -50,19 +51,19 @@ namespace lcz_rpc
             void registerInstance(
                 const BaseConnection::ptr &conn,
                 const ::lcz_rpc::HostInfo &host,
-                const std::string &method,
+                std::string_view method,
                 int load) override; // 添加服务提供者
 
-            std::vector<::lcz_rpc::HostInfo> methodHost(const std::string &method) override;
-            std::vector<::lcz_rpc::HostDetail> methodHostDetails(const std::string &method) override;
+            std::vector<::lcz_rpc::HostInfo> methodHost(std::string_view method) override;
+            std::vector<::lcz_rpc::HostDetail> methodHostDetails(std::string_view method) override;
 
             bool reportLoad(
-                const std::string &method,
+                std::string_view method,
                 const ::lcz_rpc::HostInfo &host,
                 int load) override; // 负载上报
 
             bool heartbeat(
-                const std::string &method,
+                std::string_view method,
                 const ::lcz_rpc::HostInfo &host) override; // 心跳
 
             std::vector<std::pair<std::string, ::lcz_rpc::HostInfo>> disconnectProvider(

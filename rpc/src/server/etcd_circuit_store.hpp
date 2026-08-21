@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <string_view>
 #include <memory>
 #include <chrono>
 #include "circuit_store.hpp"
@@ -22,17 +23,17 @@ namespace lcz_rpc
             EtcdCircuitStore &operator=(const EtcdCircuitStore &) = delete;
 
             // 状态变更时保存
-            virtual bool save(const std::string &method,
-                              const std::string &host, const CircuitStatus &status) override;
+            virtual bool save(std::string_view method,
+                              std::string_view host, const CircuitStatus &status) override;
             // 启动时读加载
-            virtual CircuitStatus load(const std::string &method,
-                                       const std::string &host) override;
+            virtual CircuitStatus load(std::string_view method,
+                                       std::string_view host) override;
             // provider下线清理
-            virtual bool remove(const std::string &method,
-                                const std::string &host) override;
+            virtual bool remove(std::string_view method,
+                                std::string_view host) override;
 
             // key 构造：/lcz-rpc/v1/circuit-breakers/<method>/<host>
-            std::string key_for(const std::string &method, const std::string &host);
+            std::string key_for(std::string_view method, std::string_view host);
             // base64 编解码（etcd REST API 要求 key/value 用 base64 传）
             static std::string base64_encode(const std::string &s);
             static std::string base64_decode(const std::string &s);
