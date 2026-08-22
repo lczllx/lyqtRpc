@@ -74,6 +74,16 @@ rpc/docs/
 # ====== 本地 FlatBuffers 安装 ======
 flatbuffers_install/
 
+# ====== 临时 / 草稿文件 ======
+mrpclog.txt
+tp.txt
+
+# ====== 粘贴截图（哈希乱码名，勿提交） ======
+flowchat/26a5b5b6e1576586f7ba2d3a4ebfdd4c.png
+flowchat/2a1092c377167c55cd48a8d8f234d893.jpg
+flowchat/83485bb481a95b0a48f6b127b3d7ff15.jpg
+flowchat/c0d65144bad482537c5a761a9e3bea56.jpg
+
 # ====== 项目元信息 ======
 CLAUDE.md
 
