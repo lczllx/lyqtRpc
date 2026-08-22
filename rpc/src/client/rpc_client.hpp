@@ -2,6 +2,7 @@
 #include <iostream>
 #include "requestor.hpp"
 #include "caller.hpp"
+#include "general/concepts.hpp"
 #include "circuit_breaker.hpp"
 #include "rpc_registry.hpp"
 #include "rpc_topic.hpp"
@@ -274,7 +275,7 @@ namespace lcz_rpc
                 return _caller->call(client->connection(), method_name, params, cb);
             }
             // 纯 Proto RPC 调用（含 Prometheus 客户端指标）
-            template<typename Req, typename Resp>
+            template<ProtoMessage Req, ProtoMessage Resp>
             [[nodiscard]] bool call_proto(const std::string &method_name, const Req &req, Resp *resp,
                            std::chrono::milliseconds timeout = std::chrono::seconds(5))
             {

@@ -9,6 +9,7 @@
 业务处理：调用具体的业务处理函数*/
 #include "net.hpp"
 #include "message.hpp"
+#include "concepts.hpp"
 #include "publicconfig.hpp"
 #include "log_system/lcz_log.h"
 
@@ -22,7 +23,7 @@ namespace lcz_rpc
         virtual void onMessage(const BaseConnection::ptr& conn,BaseMessage::ptr& msg)=0;       
     };
     // 类型化回调包装类：将 BaseMessage 转为 T 后调用用户回调
-    template<typename T>
+    template<RpcMessage T>
     class CallbackType:public Callback
     {
         public:
@@ -57,7 +58,7 @@ namespace lcz_rpc
         // }
          
         // 注册指定消息类型的处理函数
-        template<typename T>
+        template<RpcMessage T>
         void registerhandler(MsgType msgtype,const typename CallbackType<T>::MessageCallback& handler)
         {
             std::unique_lock<std::mutex> lock(_mutex);

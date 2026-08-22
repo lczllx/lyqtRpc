@@ -1,5 +1,6 @@
 #pragma once
 #include "general/dispacher.hpp"
+#include "general/concepts.hpp"
 #include "rpc_registry.hpp"
 #include "rpc_router.hpp"
 #include "client/rpc_client.hpp"
@@ -205,7 +206,7 @@ namespace lcz_rpc
                 _rpc_router->registerMethod(service);
             }
             // 路径二：注册纯 Proto RPC 方法，热路径零 JSON
-            template <typename Req, typename Resp>
+            template <ProtoMessage Req, ProtoMessage Resp>
             void registerProtoHandler(const std::string &method,
                                       std::function<void(const BaseConnection::ptr &, const Req &, Resp *)> handler)
             {

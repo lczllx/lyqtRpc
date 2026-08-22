@@ -1,5 +1,6 @@
 #pragma once
 #include "requestor.hpp"
+#include "general/concepts.hpp"
 #include "general/message.hpp"
 #include "general/log_system/lcz_log.h"
 #include "circuit_breaker.hpp"
@@ -189,8 +190,7 @@ namespace lcz_rpc
             // ---------- 路径二：纯 Proto API ----------
             // 同步 call_proto：Req/Resp 为 protobuf 类型，线缆为二进制，零 JSON
             // error_code 传出参数：成功时写空串；失败时写可读错误分类名(send_failed / backoff / remote_TIMEOUT ...)
-            template <typename Req, typename Resp>
-                requires requires(Req r, Resp p) { r.SerializeToString(nullptr); p.ParseFromString(""); }
+            template <ProtoMessage Req, ProtoMessage Resp>
             [[nodiscard]] bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, Resp *resp,
                             std::chrono::milliseconds timeout = std::chrono::seconds(5),
@@ -297,8 +297,7 @@ namespace lcz_rpc
             }
 
             // 异步 call_proto：通过 future<Resp> 获取结果（Resp 需默认构造）
-            template <typename Req, typename Resp>
-                requires requires(Req r, Resp p) { r.SerializeToString(nullptr); p.ParseFromString(""); }
+            template <ProtoMessage Req, ProtoMessage Resp>
             [[nodiscard]] bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, std::future<Resp> *out_future,
                             std::chrono::milliseconds timeout = std::chrono::seconds(5)) // 默认5s超时，平衡慢请求与快速失败
@@ -361,8 +360,7 @@ namespace lcz_rpc
             }
 
             // 回调式 call_proto
-            template <typename Req, typename Resp>
-                requires requires(Req r, Resp p) { r.SerializeToString(nullptr); p.ParseFromString(""); }
+            template <ProtoMessage Req, ProtoMessage Resp>
             [[nodiscard]] bool call_proto(const BaseConnection::ptr &conn, const std::string &method_name,
                             const Req &req, std::function<void(const Resp &)> on_success,
                             std::function<void(RespCode)> on_error = nullptr)

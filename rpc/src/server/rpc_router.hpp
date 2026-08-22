@@ -2,6 +2,7 @@
 #include "general/net.hpp"
 #include "general/message.hpp"
 #include "general/dispacher.hpp"
+#include "general/concepts.hpp"
 #include "general/publicconfig.hpp"
 #include "general/log_system/lcz_log.h"
 #include "general/rate_limiter.hpp"
@@ -256,7 +257,7 @@ namespace lcz_rpc{
             }
             // 注册纯 Proto 方法：handler(conn, const Req&, Resp*)，热路径零 JSON
             // 将类型化 handler 包装为统一签名的 lambda：body 解包 → Req → handler → Resp → 序列化 → 发送
-            template<typename Req, typename Resp>
+            template<ProtoMessage Req, ProtoMessage Resp>
             void registerProtoHandler(const std::string& method,
                 std::function<void(const BaseConnection::ptr&, const Req&, Resp*)> handler)
             {
