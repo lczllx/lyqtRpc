@@ -4,9 +4,9 @@
 
 [中文](README.zh-CN.md)
 
-> A lightweight C++17 RPC framework built on muduo + Protobuf. Dual TCP / shared-memory zero-copy transport, etcd registry, circuit breaker, token bucket, distributed tracing, Prometheus metrics, and an HTTP-to-RPC API gateway — all in one repo.
+> A lightweight C++20 RPC framework built on muduo + Protobuf. Dual TCP / shared-memory zero-copy transport, etcd registry, circuit breaker, token bucket, distributed tracing, Prometheus metrics, and an HTTP-to-RPC API gateway — all in one repo.
 
-Author: lczllx · Language: C++17 · Network: muduo · Transport: TCP & SHM zero-copy · Serialization: Protobuf, JSON, FlatBuffers · Build: CMake
+Author: lczllx · Language: C++20 · Network: muduo · Transport: TCP & SHM zero-copy · Serialization: Protobuf, JSON, FlatBuffers · Build: CMake
 
 ## Highlights
 
@@ -42,6 +42,8 @@ Test environment: 4C8G cloud VM, Ubuntu 22.04, g++ 12.3.0, all Protobuf, echo pa
 SHM single-thread latency is 41% of brpc, dropping to 21% at 4 threads. The ~30% gap on the TCP path stems from bthread coroutines, IOBuf zero-copy chains, and baidu_std multiplexing in brpc.
 
 ## Quick Start
+
+Requirements: g++ 11 or newer (C++20), CMake ≥ 3.16.
 
 ```bash
 git clone https://github.com/lczllx/lyqtRpc.git

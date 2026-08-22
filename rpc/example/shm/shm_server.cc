@@ -1,6 +1,6 @@
 // ==================================================================
 // shm_server.cc — Phase 4: ShmServer 完整示例（轮询模式）
-// 编译: cd rpc && g++ -std=c++17 -I. -Ibuild example/shm/shm_server.cc \
+// 编译: cd rpc && g++ -std=c++20 -I. -Ibuild example/shm/shm_server.cc \
 //         src/general/shm_channel.cc -lpthread -o build/bin/shm_server
 // ==================================================================
 #include "src/server/shm_server.hpp"

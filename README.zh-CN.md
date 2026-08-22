@@ -4,9 +4,9 @@
 
 [English](README.md)
 
-> 基于 muduo + Protobuf 的轻量级 C++17 RPC 框架。支持 TCP / 共享内存零拷贝双传输模式，集成 etcd 注册中心、熔断器、令牌桶流控、分布式追踪、Prometheus 可观测性、HTTP→RPC API 网关。
+> 基于 muduo + Protobuf 的轻量级 C++20 RPC 框架。支持 TCP / 共享内存零拷贝双传输模式，集成 etcd 注册中心、熔断器、令牌桶流控、分布式追踪、Prometheus 可观测性、HTTP→RPC API 网关。
 
-作者：lczllx · 语言：C++17 · 网络：muduo · 传输：TCP & SHM 零拷贝 · 序列化：Protobuf, JSON, FlatBuffers · 构建：CMake
+作者：lczllx · 语言：C++20 · 网络：muduo · 传输：TCP & SHM 零拷贝 · 序列化：Protobuf, JSON, FlatBuffers · 构建：CMake
 
 ## 功能亮点
 
@@ -42,6 +42,8 @@
 SHM 单线程延迟是 brpc 的 41%，4 线程降至 21%。TCP 路径与 brpc 差距约 30%，根因是 bthread 协程、IOBuf 零拷贝、baidu_std 多路复用等架构差异。
 
 ## 快速开始
+
+环境要求：g++ 11 及以上（支持 C++20），CMake ≥ 3.16。
 
 ```bash
 git clone https://github.com/lczllx/lyqtRpc.git

@@ -2,8 +2,8 @@ cmake_minimum_required(VERSION 3.16)
 
 project(lcz_rpc LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON) #编译器必须支持 C++17
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON) #编译器必须支持 C++20
 set(CMAKE_CXX_EXTENSIONS OFF)  #不要 GNU 扩展
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer") #perf 采样需要帧指针
 # 上面的 set(CMAKE_CXX_FLAGS) 会被 muduo/CMakeLists.txt 里的 string(REPLACE ... CMAKE_CXX_FLAGS) 覆盖，
