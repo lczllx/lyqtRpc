@@ -618,7 +618,7 @@ namespace lcz_rpc
 
     // ====== 零拷贝写入原语（FlatBuffers/Protobuf 直接写入 ring buffer） ======
 
-    char *ShmChannel::req_write_ptr(size_t &contig_avail)
+    std::span<char> ShmChannel::req_write_ptr()
     {
         uint64_t w = _ctrl->req_channel.write_idx.load(std::memory_order_relaxed);
         uint64_t r = _ctrl->req_channel.read_idx.load(std::memory_order_acquire);
@@ -628,8 +628,7 @@ namespace lcz_rpc
         if (avail < 8)
         {
             LCZ_DEBUG("req_write_ptr: ring buffer full (avail=%lu)", avail);
-            contig_avail = 0;
-            return nullptr;
+            return {};
         }
         uint64_t offset = w % ds;
         uint64_t contig = ds - offset;
@@ -638,12 +637,10 @@ namespace lcz_rpc
         if (body_contig <= 8)
         {
             LCZ_DEBUG("req_write_ptr: not enough contiguous space for header+body");
-            contig_avail = 0;
-            return nullptr;
+            return {};
         }
-        contig_avail = body_contig - 8;
-        LCZ_DEBUG("req_write_ptr: w=%lu r=%lu offset=%lu contig_avail=%zu", w, r, offset, contig_avail);
-        return _req_data + offset + 8;
+        LCZ_DEBUG("req_write_ptr: w=%lu r=%lu offset=%lu contig_avail=%zu", w, r, offset, static_cast<size_t>(body_contig - 8));
+        return std::span<char>(_req_data + offset + 8, static_cast<size_t>(body_contig - 8));
     }
 
     void ShmChannel::req_commit(size_t body_len, MsgType type)
@@ -667,7 +664,7 @@ namespace lcz_rpc
         notify_req();
     }
 
-    char *ShmChannel::resp_write_ptr(size_t &contig_avail)
+    std::span<char> ShmChannel::resp_write_ptr()
     {
         uint64_t w = _ctrl->resp_channel.write_idx.load(std::memory_order_relaxed);
         uint64_t r = _ctrl->resp_channel.read_idx.load(std::memory_order_acquire);
@@ -677,8 +674,7 @@ namespace lcz_rpc
         if (avail < 8)
         {
             LCZ_DEBUG("resp_write_ptr: ring buffer full (avail=%lu)", avail);
-            contig_avail = 0;
-            return nullptr;
+            return {};
         }
         uint64_t offset = w % ds;
         uint64_t contig = ds - offset;
@@ -686,12 +682,10 @@ namespace lcz_rpc
         if (body_contig <= 8)
         {
             LCZ_DEBUG("resp_write_ptr: not enough contiguous space for header+body");
-            contig_avail = 0;
-            return nullptr;
+            return {};
         }
-        contig_avail = body_contig - 8;
-        LCZ_DEBUG("resp_write_ptr: w=%lu r=%lu offset=%lu contig_avail=%zu", w, r, offset, contig_avail);
-        return _resp_data + offset + 8;
+        LCZ_DEBUG("resp_write_ptr: w=%lu r=%lu offset=%lu contig_avail=%zu", w, r, offset, static_cast<size_t>(body_contig - 8));
+        return std::span<char>(_resp_data + offset + 8, static_cast<size_t>(body_contig - 8));
     }
 
     void ShmChannel::resp_commit(size_t body_len, MsgType type)

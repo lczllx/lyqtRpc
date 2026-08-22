@@ -22,6 +22,7 @@
 #include <memory>
 #include <unordered_map>
 #include <mutex>
+#include <span>
 
 namespace lcz_rpc
 {
@@ -108,10 +109,9 @@ namespace lcz_rpc
                 if (!entry) return; // 连接已销毁，通道句柄失效，丢弃响应
                 auto resp = std::dynamic_pointer_cast<ProtoRpcResponse>(msg);
                 if (!resp) return;
-                size_t contig = 0;
-                char* buf = entry->channel.resp_write_ptr(contig);
-                if (buf && contig >= resp->byteSize()) {
-                    resp->serializeToArray(buf, contig);
+                std::span<char> buf = entry->channel.resp_write_ptr();
+                if (!buf.empty() && buf.size() >= resp->byteSize()) {
+                    resp->serializeToArray(buf);
                     entry->channel.resp_commit(resp->byteSize(), MsgType::RSP_RPC_PROTO);
                 } else {
                     std::string body = resp->serialize();

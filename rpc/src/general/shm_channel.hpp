@@ -3,6 +3,7 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <span>
 #include "log_system/lcz_log.h"
 
 #include <sys/mman.h>    // shm_open, mmap, munmap, shm_unlink
@@ -110,9 +111,10 @@ namespace lcz_rpc
                 ::write(_resp_notify_fd, &one, 8);
         }
 
-        // ====== 缓冲指针（FlatBuffers 零拷贝写入用） ======
-        char *req_write_ptr(size_t &contig_avail);       // 请求 buffer 可写区起始 + 连续可用
-        char *resp_write_ptr(size_t &contig_avail);      // 响应 buffer 可写区起始 + 连续可用
+        // ====== 缓冲指针（FlatBuffers/Protobuf 零拷贝写入用） ======
+        // 返回可写 body 区 span（空 span = 无可写连续空间），8 字节 frame header 由内部预留
+        std::span<char> req_write_ptr();
+        std::span<char> resp_write_ptr();
         void req_commit(size_t body_len, MsgType type);  // 写完提交游标 + write(notify_fd)
         void resp_commit(size_t body_len, MsgType type); // 同上，响应方向
 

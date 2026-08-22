@@ -518,6 +518,7 @@
 #include <memory>
 #include <vector>
 #include <string>
+#include <span>
 #include "utility.hpp"
 #include "level.hpp"
 #include "Logformat.hpp"
@@ -569,7 +570,7 @@ public:
         Logmsg msg(LogLevel::value::DEBUG, file, line, getLogger(), res);
         std::stringstream ss;
         _formatter->format(ss, msg);
-        log(ss.str().c_str(), ss.str().size());
+        log(ss.str());
         free(res);
     }
 
@@ -591,7 +592,7 @@ public:
         Logmsg msg(LogLevel::value::INFO, file, line, getLogger(), res);
         std::stringstream ss;
         _formatter->format(ss, msg);
-        log(ss.str().c_str(), ss.str().size());
+        log(ss.str());
         free(res);
     }
 
@@ -613,7 +614,7 @@ public:
         Logmsg msg(LogLevel::value::WARN, file, line, getLogger(), res);
         std::stringstream ss;
         _formatter->format(ss, msg);
-        log(ss.str().c_str(), ss.str().size());
+        log(ss.str());
         free(res);
     }
 
@@ -635,7 +636,7 @@ public:
         Logmsg msg(LogLevel::value::ERROR, file, line, getLogger(), res);
         std::stringstream ss;
         _formatter->format(ss, msg);
-        log(ss.str().c_str(), ss.str().size());
+        log(ss.str());
         free(res);
     }
 
@@ -657,7 +658,7 @@ public:
         Logmsg msg(LogLevel::value::FATAL, file, line, getLogger(), res);
         std::stringstream ss;
         _formatter->format(ss, msg);
-        log(ss.str().c_str(), ss.str().size());
+        log(ss.str());
         free(res);
     }
 
@@ -668,7 +669,7 @@ protected:
     std::atomic<LogLevel::value> _limit_level;// 原子操作的日志级别限制
     std::vector<LogSink::ptr> _logsink;       // 日志落地器智能指针数组
 
-    virtual void log(const char* data, size_t len) = 0;
+    virtual void log(std::span<const char> data) = 0;
 
     // 仅允许 LoggerManager 调整名称，避免与 name->logger 映射不一致
     void setLoggerNameUnsafe(const std::string& new_name) {
@@ -687,13 +688,13 @@ public:
         : Logger(logger_name, formatter, level, logsink)
     {}
 
-    virtual void log(const char* data, size_t len) override
+    virtual void log(std::span<const char> data) override
     {
         std::unique_lock<std::mutex> lock(_mtx);
         if (_logsink.empty()) return;
         for (auto& s : _logsink)
         {
-            s->log(data, len);
+            s->log(data.data(), data.size());
         }
     }
 };
@@ -711,9 +712,9 @@ public:
               looper_type))
     {}
 
-    virtual void log(const char* data, size_t len) override
+    virtual void log(std::span<const char> data) override
     {
-        _looper->push(data, len); // 已线程安全
+        _looper->push(data.data(), data.size()); // 已线程安全，push 内立即拷贝
     }
 
     void reallog(Buffer& buf)

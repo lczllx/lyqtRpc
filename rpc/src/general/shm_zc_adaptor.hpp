@@ -8,8 +8,8 @@
 // 使用示例：
 //   // 写端（零拷贝）：
 //   size_t contig;
-//   char* buf = channel.req_write_ptr(contig);
-//   RingBufAllocator alloc(buf, contig);
+//   std::span<char> buf = channel.req_write_ptr();
+//   RingBufAllocator alloc(buf);
 //   flatbuffers::FlatBufferBuilder builder(contig, &alloc, false, contig);
 //   // ... build FlatBuffer (分配发生在 ring buffer 上) ...
 //   builder.Finish(root);
@@ -30,6 +30,8 @@
 #include "./publicconfig.hpp"
 #include "./log_system/lcz_log.h"
 #include "flatbuffers/flatbuffers.h"
+#include <concepts>
+#include <type_traits>
 
 namespace lcz_rpc
 {
@@ -39,8 +41,8 @@ namespace lcz_rpc
     class RingBufAllocator : public flatbuffers::Allocator
     {
     public:
-        RingBufAllocator(char *buf, size_t capacity)
-            : _buf(reinterpret_cast<uint8_t *>(buf)), _capacity(capacity) {}
+        RingBufAllocator(std::span<char> buf)
+            : _buf(reinterpret_cast<uint8_t *>(buf.data())), _capacity(buf.size()) {}
 
         uint8_t *allocate(size_t size) override
         {
@@ -71,17 +73,22 @@ namespace lcz_rpc
     // ====== 零拷贝读取辅助 ==========================================================
     // 从 read_request/read_response 拿到的 body 数据构造，
     // 直接 cast 为 FlatBuffers 对象，无 deserialize 开销
+    // FlatBuffers 生成的 Table 类型。flatc 生成的表是 : private ::flatbuffers::Table
+    // （刻意隐藏 Table 的公开接口），std::derived_from 要求 Derived* → Base* 可转换，
+    // 私有继承下为假；std::is_base_of 只看继承关系、不看访问级别，因此用 is_base_of_v。
+    template <typename T>
+    concept FlatBufferTable = std::is_base_of_v<flatbuffers::Table, T>;
+
     class ShmZcReader
     {
     public:
-        explicit ShmZcReader(std::string_view body)
-            : _data(body.data()), _size(body.size()) {}
-
-        explicit ShmZcReader(const char *data, size_t size)
-            : _data(data), _size(size) {}
+        // 单一入口：std::string / std::string_view / const char 数组都能隐式转
+        // std::span<const char>（span 的 contiguous-range 构造），不再需要各自的构造
+        explicit ShmZcReader(std::span<const char> data)
+            : _data(data.data()), _size(data.size()) {}
 
         // 零拷贝映射为 FlatBuffers Table —— 不拷贝、不解析
-        template <typename T>
+        template <FlatBufferTable T>
         const T *as() const
         {
             if (!_data || _size == 0)

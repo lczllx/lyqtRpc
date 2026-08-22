@@ -5,7 +5,9 @@
 #include "publicconfig.hpp"
 #include "log_system/lcz_log.h"
 #include "rpc_envelope.pb.h"
+#include "concepts.hpp"
 #include<string_view>
+#include <span>
 
 namespace lcz_rpc
 {
@@ -574,9 +576,9 @@ namespace lcz_rpc
             if (!rid().empty()) _envelope.set_id(rid());
             return _envelope.ByteSizeLong();
         }
-        bool serializeToArray(void* buf, size_t size) {
+        bool serializeToArray(std::span<char> buf) {
             if (!rid().empty()) _envelope.set_id(rid());
-            return _envelope.SerializeToArray(buf, size);
+            return _envelope.SerializeToArray(buf.data(), buf.size());
         }
         [[nodiscard]] virtual bool unserialize(std::string_view msg) override
         {
@@ -636,9 +638,9 @@ namespace lcz_rpc
             if (!rid().empty()) _envelope.set_id(rid());
             return _envelope.ByteSizeLong();
         }
-        bool serializeToArray(void* buf, size_t size) {
+        bool serializeToArray(std::span<char> buf) {
             if (!rid().empty()) _envelope.set_id(rid());
-            return _envelope.SerializeToArray(buf, size);
+            return _envelope.SerializeToArray(buf.data(), buf.size());
         }
         RespCode rcode() const { return static_cast<RespCode>(_envelope.rcode()); }
         void setRcode(RespCode c) { _envelope.set_rcode(static_cast<int32_t>(c)); }
@@ -969,7 +971,7 @@ namespace lcz_rpc
             return msg;
         }
         // 按具体类型和参数创建消息（模板版本）
-        template<typename TYPE,typename... ARGS>
+        template<RpcMessage TYPE, typename... ARGS>
         static typename TYPE::ptr create(ARGS&&... args)
         {
             return std::make_shared<TYPE>(std::forward<ARGS>(args)...);

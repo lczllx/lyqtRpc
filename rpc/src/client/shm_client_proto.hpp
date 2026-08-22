@@ -17,6 +17,7 @@
 #include <unistd.h>
 #include <thread>
 #include <atomic>
+#include <span>
 
 namespace lcz_rpc
 {
@@ -79,11 +80,10 @@ namespace lcz_rpc
             if (!req)
                 return false;
 
-            size_t contig = 0;
-            char *buf = _channel.req_write_ptr(contig);
-            if (buf && contig >= req->byteSize())
+            std::span<char> buf = _channel.req_write_ptr();
+            if (!buf.empty() && buf.size() >= req->byteSize())
             {
-                req->serializeToArray(buf, contig);
+                req->serializeToArray(buf);
                 _channel.req_commit(req->byteSize(), MsgType::REQ_RPC_PROTO);
             }
             else
