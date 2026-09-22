@@ -293,22 +293,48 @@ namespace lcz_rpc
                     std::this_thread::sleep_for(backoffDelayMs(_retry_config, attempt));
                 }
             }
-            // 异步 RPC 调用，通过 future 获取结果
+            // 异步 RPC 调用，通过 future 获取结果（带指数退避重试）
+            // 重试语义下必须等待本次尝试的结果才能决定是否重试，因此会阻塞最多 timeout：
+            // 返回 true 时 result 一定已经就绪（成功 value 或业务错误 exception 交给调用方）。
             [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, RpcCaller::RpcAsyncRespose &result, const std::string &key = {})
             {
-                BaseClient::ptr client = getClient(method_name, key);
-                if (client.get() == nullptr)
+                RpcError err = RpcError::OK;
+                for (int attempt = 0; ; ++attempt)
                 {
-                    LCZ_ERROR("服务获取失败：%s", method_name.c_str());
-                    return false;
+                    BaseClient::ptr client = getClient(method_name, key);
+                    if (client.get() == nullptr)
+                    {
+                        LCZ_ERROR("服务获取失败：%s", method_name.c_str());
+                        return false;
+                    }
+                    auto conn = client->connection();
+                    if (!conn)
+                    {
+                        LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                        err = RpcError::CONN_CLOSED;
+                    }
+                    else
+                    {
+                        // 首次 5s 超时，重试尝试用更短超时，快速换 host 重发
+                        auto timeout = (attempt == 0)
+                            ? std::chrono::seconds(5)
+                            : std::chrono::milliseconds(_retry_config.retry_timeout_ms);
+                        RpcCaller::RpcAsyncRespose fut;
+                        bool sent = _caller->call(conn, method_name, params, fut, &err);
+                        if (sent && fut.wait_for(timeout) == std::future_status::ready)
+                        {
+                            // 就绪：成功 value 或业务错误 exception 都交给调用方，不再重试
+                            result = std::move(fut);
+                            return true;
+                        }
+                        // sent==false：err 已由 call 填充（熔断拒绝=CIRCUIT_OPEN，发送失败=TIMEOUT）
+                        // 未就绪：超时，需要换 host 重试
+                        if (sent) err = RpcError::TIMEOUT;
+                    }
+                    if (!isRetryable(err) || attempt >= _retry_config.max_retries) return false;
+                    LCZ_WARN("RPC 异步调用失败 method=%s err=%d，第 %d 次重试", method_name.c_str(), static_cast<int>(err), attempt + 1);
+                    std::this_thread::sleep_for(backoffDelayMs(_retry_config, attempt));
                 }
-                auto conn = client->connection();
-                if (!conn)
-                {
-                    LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
-                    return false;
-                }
-                return _caller->call(conn, method_name, params, result);
             }
             // 回调式 RPC 调用
             [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, const RpcCaller::ResponseCallback &cb, const std::string &key = {})
@@ -333,31 +359,47 @@ namespace lcz_rpc
                            std::chrono::milliseconds timeout = std::chrono::seconds(5),
                            const std::string &key = {})
             {
-                BaseClient::ptr client = getClient(method_name, key);
-                if (client.get() == nullptr)
+                RpcError err = RpcError::OK;
+                for (int attempt = 0; ; ++attempt)
                 {
-                    LCZ_ERROR("服务获取失败：%s", method_name.c_str());
-                    return false;
+                    BaseClient::ptr client = getClient(method_name, key);
+                    if (client.get() == nullptr)
+                    {
+                        LCZ_ERROR("服务获取失败：%s", method_name.c_str());
+                        return false;
+                    }
+                    auto conn = client->connection();
+                    bool ok;
+                    if (!conn)
+                    {
+                        LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                        ok = false;
+                        err = RpcError::CONN_CLOSED;
+                    }
+                    else
+                    {
+                        // 首次用调用方传入的 timeout，重试尝试用更短超时，快速换 host 重发
+                        auto attempt_timeout = (attempt == 0)
+                            ? timeout
+                            : std::chrono::milliseconds(_retry_config.retry_timeout_ms);
+                        // ---- Prometheus 客户端指标埋点 ----
+                        // onClientSend: rpc_client_requests_total +1、in-flight 并发 +1
+                        // onClientRecv: RTT 入直方图、并发 -1、失败时按具体错误类型计数
+                        // 这里测到的是"端到端 RTT"（含网络+服务端处理），
+                        // 与服务端 rpc_request_duration_us（仅 handler 耗时）互补
+                        auto t1 = std::chrono::steady_clock::now();
+                        lcz_rpc::metrics::MetricHooks::onClientSend(method_name);
+                        std::string error_code;
+                        ok = _caller->call_proto(conn, method_name, req, resp, attempt_timeout, &error_code, &err);
+                        auto t2 = std::chrono::steady_clock::now();
+                        double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+                        lcz_rpc::metrics::MetricHooks::onClientRecv(method_name, lat, error_code);
+                    }
+                    if (ok) return true;
+                    if (!isRetryable(err) || attempt >= _retry_config.max_retries) return false;
+                    LCZ_WARN("RPC call_proto 调用失败 method=%s err=%d，第 %d 次重试", method_name.c_str(), static_cast<int>(err), attempt + 1);
+                    std::this_thread::sleep_for(backoffDelayMs(_retry_config, attempt));
                 }
-                auto conn = client->connection();
-                if (!conn)
-                {
-                    LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
-                    return false;
-                }
-                // ---- Prometheus 客户端指标埋点 ----
-                // onClientSend: rpc_client_requests_total +1、in-flight 并发 +1
-                // onClientRecv: RTT 入直方图、并发 -1、失败时按具体错误类型计数
-                // 这里测到的是"端到端 RTT"（含网络+服务端处理），
-                // 与服务端 rpc_request_duration_us（仅 handler 耗时）互补
-                auto t1 = std::chrono::steady_clock::now();
-                lcz_rpc::metrics::MetricHooks::onClientSend(method_name);
-                std::string error_code;
-                bool ok = _caller->call_proto(conn, method_name, req, resp, timeout, &error_code);
-                auto t2 = std::chrono::steady_clock::now();
-                double lat = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-                lcz_rpc::metrics::MetricHooks::onClientRecv(method_name, lat, error_code);
-                return ok;
             }
 
         private:
