@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <iomanip>
 #include <cmath>
+#include <cstdint>
+#include <atomic>
 #include <iostream>
 #include <string>
 
@@ -108,10 +110,16 @@ void multi_thread_test(lcz_rpc::client::RpcClient& client,
                       const Json::Value& params,
                       int total_requests,
                       int thread_count,
-                      BenchmarkStats& stats) {
-    int requests_per_thread = total_requests / thread_count;
+                      BenchmarkStats& stats,
+                      int duration_sec = 0) {
+    int requests_per_thread = (duration_sec > 0) ? 99999999 : total_requests / thread_count;
+    auto deadline = (duration_sec > 0)
+        ? std::chrono::steady_clock::now() + std::chrono::seconds(duration_sec)
+        : std::chrono::steady_clock::time_point::max();
     std::vector<std::thread> threads;
     std::vector<BenchmarkStats> thread_stats(thread_count);
+    std::atomic<int64_t> total_qps{0};
+    std::atomic<int64_t> total_lat_us{0};
 
     stats.start_time = std::chrono::steady_clock::now();
 
@@ -119,14 +127,28 @@ void multi_thread_test(lcz_rpc::client::RpcClient& client,
         threads.emplace_back([&, t]() {
             for (int i = 0; i < requests_per_thread; ++i) {
                 auto start = std::chrono::steady_clock::now();
+                if (duration_sec > 0 && start >= deadline) break;
                 Json::Value result;
                 bool success = client.call(method, params, result);
                 auto end = std::chrono::steady_clock::now();
 
                 auto latency = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
                 thread_stats[t].record(latency, success);
+                if (duration_sec > 0) { total_qps++; total_lat_us += static_cast<int64_t>(latency); }
             }
         });
+    }
+
+    // 每秒打印聚合 QPS（仅 duration 模式）
+    if (duration_sec > 0) {
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+            int64_t qps = total_qps.exchange(0);
+            int64_t lat_sum = total_lat_us.exchange(0);
+            int avg_lat = qps > 0 ? static_cast<int>(lat_sum / qps) : 0;
+            std::cout << "Sending EchoRequest at qps=" << qps
+                      << " latency=" << avg_lat << std::endl;
+        }
     }
 
     for (auto& thread : threads) {
@@ -245,8 +267,11 @@ int main(int argc, char* argv[])
         std::cout << "单线程测试，请求数: " << requests << std::endl;
         single_thread_test(client, method, params, requests, stats);
     } else if (test_type == "multi") {
-        std::cout << "多线程测试，线程数: " << threads << ", 总请求数: " << requests << std::endl;
-        multi_thread_test(client, method, params, requests, threads, stats);
+        if (duration > 0)
+            std::cout << "多线程测试（稳态），线程数: " << threads << ", 持续: " << duration << " 秒" << std::endl;
+        else
+            std::cout << "多线程测试，线程数: " << threads << ", 总请求数: " << requests << std::endl;
+        multi_thread_test(client, method, params, requests, threads, stats, duration);
     } else if (test_type == "throughput") {
         std::cout << "吞吐量测试，持续时间: " << duration << " 秒" << std::endl;
         throughput_test(client, method, params, duration, stats);
