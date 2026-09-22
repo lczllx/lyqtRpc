@@ -129,7 +129,7 @@ lyqtRpc/
 │   │   ├── client/           # RpcClient, ClientDiscover, CircuitBreaker, ShmClient
 │   │   ├── server/           # RpcServer, Registry, LeaderElection, ShmServer
 │   │   └── general/          # ShmChannel, LVProtocol, MessageFactory, Serializer, Logger
-│   ├── tests/                # 76 GTest cases
+│   ├── tests/                # 189 GTest cases
 │   ├── example/              # Examples + benchmarks
 │   ├── proto/                # Protobuf definitions
 │   └── muduo/                # Git submodule
@@ -195,6 +195,6 @@ First build downloads and compiles all deps (protobuf / curl / jsoncpp / flatbuf
 - etcd heartbeat re-registers on every keepalive failure (lease TTL too short), write amplification under load
 - SHM payloads >64KB copy twice through the ring buffer; throughput worse than TCP zero-copy equivalents
 - No auth / encryption; no streaming RPC; Topic has no persistence
-- Unit tests cover core modules only; registry / circuit breaker / network layer untested
+- Unit tests cover core modules, circuit breaker, registry, load balancing, retry/backoff, topic, and the SHM adaptor; the full TCP network layer is still untested
 
 

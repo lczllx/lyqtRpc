@@ -129,7 +129,7 @@ lyqtRpc/
 │   │   ├── client/           # RpcClient, ClientDiscover, 熔断器, ShmClient 系列
 │   │   ├── server/           # RpcServer, Registry, 选举, ShmServer 系列
 │   │   └── general/          # ShmChannel, LVProtocol, 消息工厂, 序列化器, 日志
-│   ├── tests/                # 76 个 GTest 单测
+│   ├── tests/                # 189 个 GTest 单测
 │   ├── example/              # 示例 + 压测
 │   ├── proto/                # protobuf 定义
 │   └── muduo/                # Git 子模块
@@ -195,6 +195,6 @@ cmake --build build-vcpkg -j$(nproc)
 - etcd 心跳每次 keepalive 失败后重新注册（Lease TTL 偏短），高频场景有写放大
 - SHM 大载荷（>64KB）ring buffer memcpy 两次，吞吐不如 TCP 零拷贝方案
 - 无鉴权/加密、无流式 RPC、Topic 无持久化
-- 单测仅覆盖核心模块，注册中心/熔断器/网络层无单测
+- 单测已覆盖核心模块、熔断器、注册中心、负载均衡、重试/退避、Topic 与 SHM 适配层；完整 TCP 网络层尚无单测
 
 
