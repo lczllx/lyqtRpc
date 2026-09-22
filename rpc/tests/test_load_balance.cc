@@ -1,7 +1,10 @@
 // MethodHost 一致性哈希负载均衡单元测试：确定性 / 分布 / 增删节点最小重映射
 #include <gtest/gtest.h>
+#include <algorithm>
+#include <limits>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include "src/client/rpc_registry.hpp"
 
@@ -109,4 +112,74 @@ TEST(ConsistentHashTest, EmptyKeyFallsBack)
     fillHosts(mh, 3);
     auto d = mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, "");
     EXPECT_NE(d.host, HostInfo());
+}
+
+// 分布均衡性：160 虚拟节点应让大量 key 相对均匀地落到各主机，max:min 不应过于悬殊
+TEST(ConsistentHashTest, DistributionBalanced)
+{
+    MethodHost mh;
+    fillHosts(mh, 10);
+    std::unordered_map<std::string, int> cnt;
+    for (int i = 0; i < 50000; ++i)
+    {
+        cnt[mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, "k" + std::to_string(i)).host.first]++;
+    }
+    int mn = std::numeric_limits<int>::max(), mx = 0;
+    for (auto &kv : cnt)
+    {
+        mn = std::min(mn, kv.second);
+        mx = std::max(mx, kv.second);
+    }
+    EXPECT_EQ(cnt.size(), 10u);       // 10 台主机都应被命中
+    EXPECT_LT(mx / (double)mn, 2.5);  // 分布失衡不超过 2.5 倍（160 虚拟节点下应远小于此）
+}
+
+// 空主机列表：selectHost 返回空 HostDetail，不崩溃
+TEST(ConsistentHashTest, EmptyHostListReturnsEmpty)
+{
+    MethodHost mh;
+    auto d = mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, "k");
+    EXPECT_EQ(d.host, HostInfo());
+}
+
+// 移除不存在的主机：不崩溃，且不影响已有 key 的命中（ring 不变）
+TEST(ConsistentHashTest, RemoveAbsentHostNoop)
+{
+    MethodHost mh;
+    fillHosts(mh, 3);
+    auto before = mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, "user-42").host;
+    mh.removeHost(HostInfo("10.0.0.99", 8080)); // 不存在的主机
+    auto after = mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, "user-42").host;
+    EXPECT_EQ(before, after);
+}
+
+// 一致性哈希加节点重映射远小于取模哈希（SOURCE_HASH）——核心优势的量化对比
+TEST(ConsistentHashTest, ConsistentHashRemapsLessThanModulo)
+{
+    const int KEYS = 1000;
+    MethodHost ch, sh;
+    fillHosts(ch, 4);
+    fillHosts(sh, 4);
+
+    std::vector<HostInfo> ch_before, sh_before;
+    std::vector<std::string> keys;
+    for (int i = 0; i < KEYS; ++i)
+    {
+        std::string k = "k" + std::to_string(i);
+        keys.push_back(k);
+        ch_before.push_back(ch.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, k).host);
+        sh_before.push_back(sh.selectHost(LoadBalanceStrategy::SOURCE_HASH, k).host);
+    }
+
+    ch.appendHost(HostInfo("10.0.0.5", 8080), 0);
+    sh.appendHost(HostInfo("10.0.0.5", 8080), 0);
+
+    int ch_remap = 0, sh_remap = 0;
+    for (int i = 0; i < KEYS; ++i)
+    {
+        if (ch.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, keys[i]).host != ch_before[i]) ++ch_remap;
+        if (sh.selectHost(LoadBalanceStrategy::SOURCE_HASH, keys[i]).host != sh_before[i]) ++sh_remap;
+    }
+    // 取模哈希加节点后约 (N-1)/(N+1)=80% 重映射，一致性哈希约 1/(N+1)=20%
+    EXPECT_LT(ch_remap * 2, sh_remap);
 }

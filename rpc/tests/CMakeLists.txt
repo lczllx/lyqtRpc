@@ -50,7 +50,20 @@ add_executable(lcz_rpc_unit_tests
   test_rpc_registry.cc
   test_load_balance.cc
   test_leader_election.cc
+  test_publicconfig.cc
+  test_json.cc
+  test_caller.cc
+  test_requestor.cc
+  test_backoff.cc
+  test_topic.cc
 )
+
+# shm_zc_adaptor 依赖本地安装的 FlatBuffers（含生成头 rpc_message_generated.h），
+# flatc 缺失（LCZ_HAVE_FLATBUFFERS=FALSE）时跳过该文件与 include 路径。
+if(TARGET lcz_flatbuf)
+  target_sources(lcz_rpc_unit_tests PRIVATE test_shm_zc_adaptor.cc)
+  target_link_libraries(lcz_rpc_unit_tests PRIVATE lcz_flatbuf)
+endif()
 
 target_include_directories(lcz_rpc_unit_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
