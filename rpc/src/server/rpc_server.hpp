@@ -159,49 +159,8 @@ namespace lcz_rpc
             // 注册 RPC 方法；若启用发现则同步向注册中心注册并启动心跳/负载上报
             void registerMethod(const ServiceDescribe::ptr &service)
             {
-                if (_enablediscover) // 如果启用服务发现，向注册中心注册方法
-                {
-                    int currentLoad = this->currentLoad();
-                    bool ok = false;
-                    // 注册中心启动窗口期内可能暂不可用，最多重试 3 次（每次间隔 1s）
-                    for (int attempt = 1; attempt <= 3; ++attempt)
-                    {
-                        ok = _client_registry->methodRegistry(service->getMethodname(), _access_addr, currentLoad);
-                        if (ok)
-                            break;
-                        LCZ_WARN("[Provider] 注册到 Registry 失败，method=%s host=%s:%d attempt=%d/3",
-                                 service->getMethodname().c_str(), _access_addr.first.c_str(),
-                                 _access_addr.second, attempt);
-                        std::this_thread::sleep_for(std::chrono::seconds(1));
-                    }
-                    if (ok)
-                    {
-                        LCZ_INFO("[Provider] 注册成功 method=%s host=%s:%d load=%d",
-                                 service->getMethodname().c_str(), _access_addr.first.c_str(),
-                                 _access_addr.second, currentLoad);
-                        {
-                            std::unique_lock<std::mutex> lock(_methods_mutex);
-                            _registered_methods.emplace_back(service->getMethodname());
-                        }
-                        if (!_report_started.exchange(true)) // 原子地将_report_started设置为true
-                        {
-                            // 每3秒上报一次负载,绑定_client_registry的reportLoad方法
-                            _report_loop_ptr->runEvery(
-                                3.0, // 周期按需配置
-                                std::bind(&RpcServer::reportLoadTick, this));
-                            // heartbeat_interval_sec秒发送一次心跳,绑定_client_registry的heartbeatTick方法
-                            _report_loop_ptr->runEvery(
-                                static_cast<double>(_hb_config.heartbeat_interval_sec) /*这是给runEvery方法的参数，表示心跳间隔时间*/,
-                                std::bind(&RpcServer::heartbeatTick, this));
-                        }
-                    }
-                    else
-                    {
-                        LCZ_ERROR("[Provider] 注册到 Registry 最终失败，method=%s host=%s:%d",
-                                  service->getMethodname().c_str(), _access_addr.first.c_str(),
-                                  _access_addr.second);
-                    }
-                }
+                // 如果启用服务发现，向注册中心注册方法并启动心跳/负载上报
+                registerToRegistry(service->getMethodname());
                 // 在路由器中注册方法（线程安全）
                 _rpc_router->registerMethod(service);
             }
@@ -210,7 +169,12 @@ namespace lcz_rpc
             void registerProtoHandler(const std::string &method,
                                       std::function<void(const BaseConnection::ptr &, const Req &, Resp *)> handler)
             {
+                // 先注册本地处理器，再对外注册：避免注册中心已广播、本地却还没就绪的窗口
                 _proto_rpc_router->registerProtoHandler<Req, Resp>(method, std::move(handler));
+                // JSON 路径（registerMethod）与 Proto 路径都必须走这里，
+                // 只注册本地路由的话客户端发现不到，且心跳/负载上报只遍历
+                // _registered_methods，漏登记的方法会被注册中心的空闲扫描剔除
+                registerToRegistry(method);
             }
             // 启动服务器（阻塞）
             void start() { _server->start(); }
@@ -268,6 +232,54 @@ namespace lcz_rpc
             }
 
         private:
+            // 向注册中心注册一个方法名，并确保心跳/负载上报定时器已启动。
+            // JSON（registerMethod）与 Proto（registerProtoHandler）两条注册路径共用；
+            // 未启用服务发现时为空操作。注册中心不可用时最多阻塞约 3 秒（3 次尝试 × 1s 间隔）。
+            void registerToRegistry(const std::string &method_name)
+            {
+                if (!_enablediscover || !_client_registry)
+                    return;
+
+                const int currentLoad = this->currentLoad();
+                bool ok = false;
+                // 注册中心启动窗口期内可能暂不可用，最多重试 3 次（每次间隔 1s）
+                for (int attempt = 1; attempt <= 3; ++attempt)
+                {
+                    ok = _client_registry->methodRegistry(method_name, _access_addr, currentLoad);
+                    if (ok)
+                        break;
+                    LCZ_WARN("[Provider] 注册到 Registry 失败，method=%s host=%s:%d attempt=%d/3",
+                             method_name.c_str(), _access_addr.first.c_str(),
+                             _access_addr.second, attempt);
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+                if (!ok)
+                {
+                    LCZ_ERROR("[Provider] 注册到 Registry 最终失败，method=%s host=%s:%d",
+                              method_name.c_str(), _access_addr.first.c_str(),
+                              _access_addr.second);
+                    return;
+                }
+
+                LCZ_INFO("[Provider] 注册成功 method=%s host=%s:%d load=%d",
+                         method_name.c_str(), _access_addr.first.c_str(),
+                         _access_addr.second, currentLoad);
+                {
+                    std::unique_lock<std::mutex> lock(_methods_mutex);
+                    _registered_methods.emplace_back(method_name);
+                }
+                if (!_report_started.exchange(true)) // 原子地将_report_started设置为true
+                {
+                    // 每3秒上报一次负载,绑定_client_registry的reportLoad方法
+                    _report_loop_ptr->runEvery(
+                        3.0, // 周期按需配置
+                        std::bind(&RpcServer::reportLoadTick, this));
+                    // heartbeat_interval_sec秒发送一次心跳,绑定_client_registry的heartbeatTick方法
+                    _report_loop_ptr->runEvery(
+                        static_cast<double>(_hb_config.heartbeat_interval_sec) /*这是给runEvery方法的参数，表示心跳间隔时间*/,
+                        std::bind(&RpcServer::heartbeatTick, this));
+                }
+            }
             // 读取 /proc/loadavg 1 分钟负载均值，除以 CPU 核数后 ×100 归一化到 [0, 100]
             int currentLoad() const
             {
