@@ -238,6 +238,7 @@ namespace lcz_rpc
                 }
                 else
                 {
+                    _direct_host = HostInfo(ip, port);
                     auto msg_cb = std::bind(&Dispacher::onMessage, _dispacher.get(), std::placeholders::_1, std::placeholders::_2);
                     _rpc_client = lcz_rpc::ClientFactory::create(ip, port);
                     _rpc_client->setMessageCallback(msg_cb);
@@ -265,7 +266,8 @@ namespace lcz_rpc
                 RpcError err = RpcError::OK;
                 for (int attempt = 0; ; ++attempt)
                 {
-                    BaseClient::ptr client = getClient(method_name, key);
+                    HostInfo host;
+                    BaseClient::ptr client = getClient(method_name, key, &host);
                     if (client.get() == nullptr)
                     {
                         LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -276,6 +278,9 @@ namespace lcz_rpc
                     if (!conn)
                     {
                         LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                        // 连接不可用同样是一次失败，必须计入熔断器：
+                        // 这条路径不进 RpcCaller，熔断器就永远看不到「该 host 已断」
+                        _caller->onConnectionUnavailable(method_name, hostKey(host));
                         ok = false;
                         err = RpcError::CONN_CLOSED;
                     }
@@ -301,7 +306,8 @@ namespace lcz_rpc
                 RpcError err = RpcError::OK;
                 for (int attempt = 0; ; ++attempt)
                 {
-                    BaseClient::ptr client = getClient(method_name, key);
+                    HostInfo host;
+                    BaseClient::ptr client = getClient(method_name, key, &host);
                     if (client.get() == nullptr)
                     {
                         LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -311,6 +317,8 @@ namespace lcz_rpc
                     if (!conn)
                     {
                         LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                        // 连接不可用同样是一次失败，必须计入熔断器（详见同步 call）
+                        _caller->onConnectionUnavailable(method_name, hostKey(host));
                         err = RpcError::CONN_CLOSED;
                     }
                     else
@@ -339,7 +347,8 @@ namespace lcz_rpc
             // 回调式 RPC 调用
             [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, const RpcCaller::ResponseCallback &cb, const std::string &key = {})
             {
-                BaseClient::ptr client = getClient(method_name, key);
+                HostInfo host;
+                BaseClient::ptr client = getClient(method_name, key, &host);
                 if (client.get() == nullptr)
                 {
                     LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -349,6 +358,8 @@ namespace lcz_rpc
                 if (!conn)
                 {
                     LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                    // 连接不可用同样是一次失败，必须计入熔断器（详见同步 call）
+                    _caller->onConnectionUnavailable(method_name, hostKey(host));
                     return false;
                 }
                 return _caller->call(conn, method_name, params, cb);
@@ -362,7 +373,8 @@ namespace lcz_rpc
                 RpcError err = RpcError::OK;
                 for (int attempt = 0; ; ++attempt)
                 {
-                    BaseClient::ptr client = getClient(method_name, key);
+                    HostInfo host;
+                    BaseClient::ptr client = getClient(method_name, key, &host);
                     if (client.get() == nullptr)
                     {
                         LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -373,6 +385,8 @@ namespace lcz_rpc
                     if (!conn)
                     {
                         LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                        // 连接不可用同样是一次失败，必须计入熔断器（详见同步 call）
+                        _caller->onConnectionUnavailable(method_name, hostKey(host));
                         ok = false;
                         err = RpcError::CONN_CLOSED;
                     }
@@ -480,7 +494,9 @@ namespace lcz_rpc
                 return client;
             }
             // 根据 method 获取或创建对应的 RPC 客户端（支持服务发现）
-            BaseClient::ptr getClient(const std::string &method, const std::string &key = {})
+            // out_host：输出本次选中的 host。连接为空时拿不到 conn->peerAddress()，
+            // 而熔断需要 host 作 key（格式与 hostKey 一致），所以必须由这里带出来
+            BaseClient::ptr getClient(const std::string &method, const std::string &key = {}, HostInfo *out_host = nullptr)
             {
                 BaseClient::ptr client;
                 if (_enablediscover)
@@ -494,6 +510,7 @@ namespace lcz_rpc
                         return BaseClient::ptr();
                     }
                     HostInfo host = detail.host;
+                    if (out_host) *out_host = host;
                     client = getClient(host);
                     // 如果没有实例化客户端就创建一个新的
                     if (client.get() == nullptr)
@@ -504,6 +521,7 @@ namespace lcz_rpc
                 else
                 {
                     client = _rpc_client;
+                    if (out_host) *out_host = _direct_host;
                 }
                 return client;
             }
@@ -546,6 +564,7 @@ namespace lcz_rpc
             CircuitBreaker::ptr _breaker;         // 熔断器（必须在 _caller 之前声明）
             RpcCaller::ptr _caller;
             Dispacher::ptr _dispacher;
+            HostInfo _direct_host;                // 直连模式的目标地址（连接不可用时也要能喂熔断器）
             LoadBalanceStrategy _loadbalance_strategy;//负载均衡策略
             RetryConfig _retry_config;//指数退避重试配置
         };

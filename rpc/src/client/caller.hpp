@@ -24,6 +24,17 @@ namespace lcz_rpc
             RpcCaller(const Requestor::ptr &reqtor, CircuitBreaker::ptr breaker = nullptr)
                 : _requestor(reqtor), _breaker(std::move(breaker)) {}
 
+            // 连接不可用（conn 为空）时由 RpcClient 调用。
+            // 这条路径拿不到 conn->peerAddress()，所以 host 由调用方传入；
+            // 但熔断记账仍统一收敛在 RpcCaller —— 否则「连接已断」这个最强的失败
+            // 信号永远进不了熔断器，一个持续不可用的 host 也不会被熔断。
+            void onConnectionUnavailable(const std::string &method_name, const std::string &host)
+            {
+                LCZ_WARN("连接不可用，计入熔断 method=%s host=%s", method_name.c_str(), host.c_str());
+                if (_breaker)
+                    _breaker->onFailure(method_name, host);
+            }
+
             // 同步 RPC：阻塞等待响应，结果写入 result。
             // err 输出失败原因（供上层重试判定）；timeout 控制单次等待时长（重试尝试可传更短超时）。
             [[nodiscard]] bool call(const BaseConnection::ptr &conn, const std::string &method_name, const Json::Value &params, Json::Value &result,
