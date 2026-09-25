@@ -23,26 +23,28 @@ Author: lczllx · Language: C++20 · Network: muduo · Transport: TCP & SHM zero
 
 Test environment: 4C8G cloud VM, Ubuntu 22.04, g++ 11.4.0, all Protobuf, echo payload. brpc 1.17.0.
 
+Method: the brpc column takes the median of its per-second samples (`-connection_type=single`, `pooled` for the 4-thread row); that output carries only mean latency, so the brpc P99 cells are left blank. The lyqtRpc column is a 30-second steady-state run.
+
 ### Single-thread latency & throughput
 
 | Payload | brpc TCP | lyqtRpc TCP Proto | lyqtRpc SHM Proto ZC |
 |---|---:|---:|---:|
-| 16B QPS | 17,859 | 13,556 | **26,725** |
-| 16B P90 | 61μs | 83μs | **30μs** |
-| 16B P99 | 74μs | 100μs | **38μs** |
-| 64KB QPS | 6,268 | 2,751 | **12,735** |
-| 64KB P90 | 171μs | 397μs | **71μs** |
-| 64KB P99 | 237μs | 483μs | **137μs** |
+| 16B QPS | 14,038 | 10,094 | **28,561** |
+| 16B mean | 69μs | 98μs | — |
+| 16B P99 | — | 146μs | **36μs** |
+| 64KB QPS | 4,241 | 2,209 | **12,888** |
+| 64KB mean | 227μs | 444μs | — |
+| 64KB P99 | — | 707μs | **120μs** |
 
 ### 4-thread concurrency
 
 | Metric | brpc TCP | lyqtRpc TCP Proto | lyqtRpc SHM Proto ZC |
 |---|---:|---:|---:|
-| QPS | 44,534 | 38,834 | **153,916** |
-| P90 | 129μs | 125μs | **23μs** |
-| P99 | 233μs | 189μs | **39μs** |
+| QPS | 47,075 | 33,379 | **127,197** |
+| Mean | 82μs | 119μs | — |
+| P99 | — | 217μs | **52μs** |
 
-SHM latency is well below brpc: single-thread P99 is ≈51% of brpc, dropping to ≈17% at 4 threads. TCP QPS is ≈76% of brpc for 16B payloads but falls to ≈44% for 64KB, stemming from bthread coroutines, IOBuf zero-copy chains, and baidu_std multiplexing in brpc.
+SHM throughput is 2.0× brpc's TCP path at 16B single-thread, 3.0× at 64KB, and 2.7× at 4 threads. The TCP path reaches ≈72% of brpc at 16B single-thread and ≈52% at 64KB, stemming from bthread coroutines, IOBuf zero-copy chains, and baidu_std multiplexing in brpc.
 
 ## Quick Start
 
@@ -191,7 +193,7 @@ First build downloads and compiles all deps (protobuf / curl / jsoncpp / flatbuf
 
 ## Known Limitations
 
-- TCP path single-connection `send()` holds a lock; connection pool + protocol multiplexing planned
+- TCP path reuses long-lived connections per host (connection pool), but each host still has a single connection — `send()` serializes behind a lock when threads share a host; protocol multiplexing (stream_id) still pending
 - etcd heartbeat re-registers on every keepalive failure (lease TTL too short), write amplification under load
 - SHM payloads >64KB copy twice through the ring buffer; throughput worse than TCP zero-copy equivalents
 - No auth / encryption; no streaming RPC; Topic has no persistence
