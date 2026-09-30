@@ -93,3 +93,7 @@ gdb_debug/
 *.tar.xz
 *.zip
 *.7z
+
+# ====== 压测/火焰图产物 ======
+# collect_flamegraph.sh 与 run_consistent_hash_bench.sh 的输出目录
+rpc/example/benchmark/bench_result/

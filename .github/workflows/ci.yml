@@ -104,6 +104,13 @@ jobs:
           LCZ_ETCD: http://localhost:2379
         run: ./bin/lcz_rpc_unit_tests
 
+      # 一致性哈希负载均衡断言：微基准的 [3] 分布均衡性 / [4] 增删节点重映射率
+      # 是纯逻辑项、两次运行字节一致，可作硬断言（虚拟节点退化或策略退回取模都会
+      # 被拦住）；[1] 单次延迟、[2] 哈希环构建耗时是计时项，跨机/跨次会抖，不断言。
+      - name: Consistent-hash distribution check
+        working-directory: rpc/build
+        run: bash ../example/benchmark/run_consistent_hash_bench.sh --check
+
       # SHM 零拷贝路径 smoke test
       - name: SHM zero-copy smoke test
         working-directory: rpc/build
