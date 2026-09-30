@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================
-# SHM (共享内存) RPC 性能测试 — JSON + FlatBuffers 零拷贝对比
+# SHM (共享内存) RPC 性能测试 — Proto 零拷贝 / JSON / FlatBuffers 对比
 # 前置: 已编译项目
-# 用法: bash run_shm_benchmark.sh          # 运行全部（JSON + FlatBuf）
+# 用法: bash run_shm_benchmark.sh          # 运行全部（Proto + JSON + FlatBuf + 载荷对比）
+#       bash run_shm_benchmark.sh proto    # 仅 Proto 零拷贝（README 性能表的 SHM 列）
 #       bash run_shm_benchmark.sh json      # 仅 JSON
 #       bash run_shm_benchmark.sh flat      # 仅 FlatBuffers 零拷贝
+#       bash run_shm_benchmark.sh cmp       # 仅载荷大小对比（三路）
+# 说明: 本轮压测的 duration 参数 >0 时按时间跑、否则按请求数跑，
+#       故下面各轮的第三个参数（请求数）在 duration 非 0 时只是标签。
 # ============================================================
 set -e
 
@@ -31,7 +35,7 @@ if [ -z "$BIN_DIR" ]; then
 fi
 
 TEST_REQUESTS=20000
-MODE="${1:-all}"  # all / json / flat
+MODE="${1:-all}"  # all / proto / json / flat / cmp
 
 # 启动服务端 + 等待就绪
 # 注意: 不能通过 $() 返回 PID（子 shell 退出会杀后台进程），用全局变量 _SRV_PID
@@ -79,6 +83,27 @@ run_one_round() {
     stop_server "$shm"
 }
 
+# ========== Protobuf 零拷贝路径测试（README 性能表的 SHM Proto ZC 列） ==========
+run_proto_bench() {
+    local SRV="$BIN_DIR/shm_benchmark_proto_server"
+    local CLI="$BIN_DIR/shm_benchmark_proto_client"
+    local SHM_NAME="lcz_shm_proto_bench"
+
+    for bin in "$SRV" "$CLI"; do
+        if [ ! -f "$bin" ]; then
+            echo -e "${YELLOW}[SKIP] 找不到 $bin${NC}"; return
+        fi
+    done
+
+    echo -e "\n${BOLD}${CYAN}╔══════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${CYAN}║  SHM Protobuf 零拷贝 RPC 性能测试                        ║${NC}"
+    echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════════════════════╝${NC}"
+
+    run_one_round "[单线程]" "$SRV" "$CLI" "$SHM_NAME" single   add $TEST_REQUESTS
+    run_one_round "[多线程]" "$SRV" "$CLI" "$SHM_NAME" multi    add $TEST_REQUESTS 4
+    run_one_round "[吞吐量]" "$SRV" "$CLI" "$SHM_NAME" throughput add 0 0 10
+}
+
 # ========== JSON 路径测试 ==========
 run_json_bench() {
     local SRV="$BIN_DIR/shm_benchmark_server"
@@ -121,8 +146,10 @@ run_flat_bench() {
     run_one_round "[吞吐量]" "$SRV" "$CLI" "$SHM_NAME" throughput add 0 0 10
 }
 
-# ========== 载荷大小对比（echo 字符串，JSON vs FlatBuf ZC） ==========
+# ========== 载荷大小对比（echo 字符串，Proto ZC vs JSON vs FlatBuf ZC） ==========
 run_payload_compare() {
+    local PROTO_SRV="$BIN_DIR/shm_benchmark_proto_server"
+    local PROTO_CLI="$BIN_DIR/shm_benchmark_proto_client"
     local JSON_SRV="$BIN_DIR/shm_benchmark_server"
     local JSON_CLI="$BIN_DIR/shm_benchmark_client"
     local FLAT_SRV="$BIN_DIR/shm_benchmark_server_zc"
@@ -135,6 +162,9 @@ run_payload_compare() {
 
         echo -e "\n${BOLD}${CYAN}══════════ 载荷: $label ══════════${NC}"
 
+        if [ -f "$PROTO_SRV" ] && [ -f "$PROTO_CLI" ]; then
+            run_one_round "  Proto   echo $label" "$PROTO_SRV" "$PROTO_CLI" "lcz_shm_proto_bench" single echo $REQ 0 0 $sz
+        fi
         if [ -f "$JSON_SRV" ] && [ -f "$JSON_CLI" ]; then
             run_one_round "  JSON    echo $label" "$JSON_SRV" "$JSON_CLI" "lcz_shm_bench"     single echo $REQ 0 0 $sz
         fi
@@ -146,13 +176,15 @@ run_payload_compare() {
 
 # ====== 执行 ======
 case "$MODE" in
+    proto) run_proto_bench ;;
     json)  run_json_bench ;;
     flat)  run_flat_bench ;;
     cmp)   run_payload_compare ;;
     all)
+        run_proto_bench
         run_json_bench
         run_flat_bench
         run_payload_compare
         ;;
-    *) echo "用法: bash run_shm_benchmark.sh [json|flat|cmp|all]" ;;
+    *) echo "用法: bash run_shm_benchmark.sh [proto|json|flat|cmp|all]" ;;
 esac
