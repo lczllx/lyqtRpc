@@ -1,10 +1,41 @@
-# 减小 docker build 上下文（构建上下文 = 仓库根 RPC/）
+# 减小 docker build 上下文（构建上下文 = 仓库根，docker-compose.yml 里是 context: .）
+# 用 legacy builder 实测（BuildKit 按内容去重，量不准）：1.546GB → 14.54MB
+# （**/build-*）→ 2.585MB（本文件其余各条，排的都是 COPY 目标 rpc/、gateway/ 之外的
+# 根目录产物）。改动这些规则不会动到镜像：重建时 11 个可缓存层全部命中缓存。
 .git
 .github
 **/.git
 **/build
-**/build-ci
+# 覆盖 build-ci / build-asan / build-fuzz 等所有预设构建目录。
+# 少了这条，Dockerfile 的 `COPY rpc/ /src/rpc/` 会把 rpc/build-asan 下
+# 约 2.5GB 的 ASan 二进制一起拷进 builder 层（最终镜像虽然只取
+# build/bin，但层与构建缓存都会被撑大，上下文从几十 MB 涨到 1.55GB）。
+**/build-*/
 **/*.o
 **/*.a
 **/.cache
 rpc/docs
+# 宿主机侧的 FlatBuffers 安装前缀（rpc/CMakeLists.txt:142 的 _fb_prefix，即
+# <repo>/flatbuffers_install），只服务宿主机构建，排除它不影响镜像：Dockerfile
+# 只 COPY rpc/ 与 gateway/，而容器里 rpc 的上一级是 /src 而不是仓库根，
+# 所以 /src/flatbuffers_install 从来就不存在。
+# 顺带记一个既有缺口（与这一行无关，加不加它都一样）：rpc/CMakeLists.txt:145-150
+# 那段"回退到系统安装"是死代码 —— _fb_flatc/_fb_inc 已被预设为"非 NOTFOUND"的
+# 值，find_program/find_path 会直接跳过搜索（用 cmake -P 复现过：两个都跳过），
+# 于是 builder 里装了 flatbuffers-compiler 也用不上，判定"未找到 FlatBuffers"
+# 后静默跳过 SHM FlatBuffers 示例：镜像里只有 33 个二进制，缺 5 个 *_zc。
+/flatbuffers_install
+# 以下都是"仓库要留、但构建用不到"的产物。Dockerfile 的 COPY 只取 rpc/ 与
+# gateway/，这些在上下文里纯属搭便车，加起来又是 4MB 量级。
+# 注意: .dockerignore 不支持行尾注释，整行都会被当作 pattern，注释必须独占一行。
+
+# perf 火焰图输出（after17_20 / before17_20）
+/bench_flame_result
+# 文档配图（含文件名带空格的 png/jpg）
+/flowchat
+# demo 脚本运行时日志（未入库）
+/demo-logs
+# 临时压测产物，同样不入库
+/fly.txt
+/qps.txt
+/lyqtrpc_qps.txt
