@@ -30,7 +30,7 @@ CONSUMER_BIN="${BIN_DIR}/test4_consumer_client"
 
 if [[ ! -x "${REG_BIN}" || ! -x "${PROVIDER_BIN}" || ! -x "${CONSUMER_BIN}" ]]; then
   echo "[ERROR] 缺少服务发现 demo 可执行文件。请先编译："
-  echo "  cd ${ROOT_DIR}/rpc && mkdir -p build && cd build && cmake .. && make -j"
+  echo "  cd ${ROOT_DIR}/rpc && cmake --preset system -B build && cmake --build build -j\$(nproc)"
   exit 1
 fi
 

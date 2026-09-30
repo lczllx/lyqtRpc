@@ -38,9 +38,23 @@ COMPOSE_DIR="$ROOT_DIR"
 # 检查端口是否已被占用（兼容 docker compose 场景）
 port_listening() { ss -tln | grep -q ":${1} "; }
 
-# 检查 docker-compose 是否管理着指定服务且处于运行状态
+# 调用 docker compose，优先 v2 插件、回退旧版 docker-compose
+# （与 autobuild/docker.sh 的探测顺序保持一致）。只认 v1 的话，
+# 只装了 v2 的机器上 compose_running 恒为假，脚本会以为没有容器在跑，
+# 转而本地启动 registry/provider 去抢 8080/8889。
+compose_cmd() {
+    if docker compose version >/dev/null 2>&1; then
+        docker compose "$@"
+    elif command -v docker-compose >/dev/null 2>&1; then
+        docker-compose "$@"
+    else
+        return 1
+    fi
+}
+
+# 检查 docker compose 是否管理着指定服务且处于运行状态
 compose_running() {
-    cd "$COMPOSE_DIR" && docker-compose ps "$1" 2>/dev/null | grep -q "Up"
+    cd "$COMPOSE_DIR" && compose_cmd ps "$1" 2>/dev/null | grep -q "Up"
 }
 
 cleanup() {
@@ -73,8 +87,8 @@ demo_etcd() {
     fi
 
     if $DOCKER_MODE; then
-        step 1 "registry 由 docker-compose 管理（端口 8080）"
-        info "跳过本地启动，后续通过 docker-compose stop/start 控制"
+        step 1 "registry 由 docker compose 管理（端口 8080）"
+        info "跳过本地启动，后续通过 docker compose stop/start 控制"
     else
         step 1 "启动 registry（etcd 后端，Lease 15s TTL）"
         "$BIN/test1_registry_server" > "$LOG_DIR/etcd_reg.log" 2>&1 &
@@ -98,8 +112,8 @@ demo_etcd() {
     etcdctl get --prefix /lcz-rpc/ 2>/dev/null | head -8 || true
 
     if $DOCKER_MODE; then
-        step 3 "停掉 registry 容器（docker-compose stop registry）"
-        cd "$COMPOSE_DIR" && docker-compose stop registry 2>&1 | tail -1
+        step 3 "停掉 registry 容器（docker compose stop registry）"
+        cd "$COMPOSE_DIR" && compose_cmd stop registry 2>&1 | tail -1
         sleep 2
         info "registry 容器已停止，provider 的 Lease 将随旧 registry 丢失"
     else
@@ -110,8 +124,8 @@ demo_etcd() {
     fi
 
     if $DOCKER_MODE; then
-        step 4 "重启 registry 容器（docker-compose start registry）"
-        cd "$COMPOSE_DIR" && docker-compose start registry 2>&1 | tail -1
+        step 4 "重启 registry 容器（docker compose start registry）"
+        cd "$COMPOSE_DIR" && compose_cmd start registry 2>&1 | tail -1
         sleep 3
         info "registry 容器已从 etcd 恢复数据并重新监听"
     else
@@ -212,7 +226,7 @@ demo_timeout() {
     if compose_running provider || port_listening 8889; then
         step 2 "端口 8889 已被占用（docker compose provider），跳过慢 provider 启动"
         warn "本演示需要慢 provider 绑定 8889，与已有服务冲突"
-        warn "请先执行: docker-compose stop provider"
+        warn "请先执行: docker compose stop provider"
         return 1
     fi
     step 2 "启动慢 provider（add 延时 10s）"
@@ -248,7 +262,7 @@ demo_circuit() {
 
     if compose_running provider || port_listening 8889; then
         warn "端口 8889 已被占用（docker compose provider 正在运行），熔断器测试 server 无法绑定"
-        warn "请先执行: docker-compose stop provider"
+        warn "请先执行: docker compose stop provider"
         return 1
     fi
 
@@ -363,7 +377,7 @@ demo_ha() {
     if compose_running registry || port_listening 8080; then
         warn "端口 8080 已被占用（docker compose registry 正在运行）"
         warn "HA 演示需要同时启动 3 个本地 registry 实例共用 8080 端口，与已有服务冲突"
-        warn "请先执行: docker-compose stop registry"
+        warn "请先执行: docker compose stop registry"
         return 1
     fi
 
@@ -488,9 +502,9 @@ case "${1:-}" in
             compose_running provider && warn "  - demo_circuit（熔断测试 server 绑定 8889）"
             echo ""
             warn "建议先停掉 docker compose 再跑 all:"
-            warn "  docker-compose stop"
+            warn "  docker compose stop"
             warn "  ./demo.sh all"
-            warn "  docker-compose start  # 跑完后恢复"
+            warn "  docker compose start  # 跑完后恢复"
             echo ""
             info "也可以跳过冲突演示，只跑不冲突的:"
             info "  ./demo.sh etcd      # 已适配 docker"
@@ -519,7 +533,7 @@ case "${1:-}" in
         echo ""
         echo "  注意: etcd / ha 演示需要先启动 etcd 服务"
         echo "    宿主机: etcd --listen-client-urls=http://127.0.0.1:2379 --advertise-client-urls=http://127.0.0.1:2379 &"
-        echo "    Docker: docker-compose up -d etcd"
+        echo "    Docker: docker compose up -d etcd"
         echo ""
         echo "  日志: $LOG_DIR/"
         ;;
