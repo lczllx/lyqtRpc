@@ -66,5 +66,47 @@ services:
     ports:
       - "8889:8889"
 
+  # Proto 后端：benchmark_server 同时提供 add / echo 两个 Proto 方法。
+  # 网关必须指向它而不是 provider —— 网关走 call_proto（Proto 路径），
+  # 而 test1_rpc_server 只用 registerMethod 注册了 JSON 服务；服务端 JSON
+  # 与 Proto 是两套独立注册表（rpc_server.hpp 的 _rpc_router 与
+  # _proto_rpc_router），proto 路由查不到即回 SERVICE_NOT_FOUND，
+  # 网关会把它转成 HTTP 502。实测过：指向 provider 时 /api/add、/api/echo
+  # 都是 502，指向本服务则双双 200。
+  # host 侧 8889 已被 provider 占用，故对外发布为 8890。
+  bench:
+    build:
+      context: .
+      network: host
+    restart: unless-stopped
+    command: /opt/rpc/bin/benchmark_server 8889 0 8080 0 9090
+    environment:
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
+    ports:
+      - "8890:8889"
+
+  # HTTP→RPC 网关，直连 bench（gateway_server 内部 discover=false，不走注册中心）。
+  # 注意 host 侧端口重映射: 容器内仍是默认的 HTTP 8080 / metrics 9091，
+  # 但 host 的 8080 已被 registry 占用，故网关对外发布为 8081。
+  # 路由: POST /api/add、POST /api/echo（字段见 rpc_envelope.proto，
+  # 分别是 num1/num2 与 data）、GET /api/health、GET /diagnose。
+  gateway:
+    build:
+      context: .
+      network: host
+    restart: unless-stopped
+    depends_on:
+      - bench
+    command: /opt/rpc/bin/gateway_server bench 8889 8080 9091
+    environment:
+      http_proxy: ""
+      https_proxy: ""
+      no_proxy: "*"
+    ports:
+      - "8081:8080"
+      - "9091:9091"
+
 volumes:
   etcd-data:
