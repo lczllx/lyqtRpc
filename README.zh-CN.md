@@ -23,7 +23,7 @@
 
 测试环境：4C8G 云机, Ubuntu 22.04, g++ 11.4.0, 全部 Protobuf 序列化, echo 字符串回显。brpc 1.17.0。
 
-测试方法：brpc 侧为逐秒采样取中位数（`-connection_type=single`，4 线程为 `pooled`），其输出只有平均延迟，故 P99 留空；lyqtRpc 侧为 30 秒稳态压测。
+测试方法：brpc 侧为逐秒采样取中位数（`-connection_type=single`，4 线程为 `pooled`），其输出只有平均延迟，故 P99 留空；lyqtRpc 侧为 30 秒稳态压测（TCP 走 `example/benchmark/run_benchmark.sh` 的稳态档，SHM 走 `example/shm/run_shm_benchmark.sh proto`，`STEADY_SECS` 可改时长）。
 
 ### 单线程延迟与吞吐
 

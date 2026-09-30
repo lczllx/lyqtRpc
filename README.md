@@ -23,7 +23,7 @@ Author: lczllx · Language: C++20 · Network: muduo · Transport: TCP & SHM zero
 
 Test environment: 4C8G cloud VM, Ubuntu 22.04, g++ 11.4.0, all Protobuf, echo payload. brpc 1.17.0.
 
-Method: the brpc column takes the median of its per-second samples (`-connection_type=single`, `pooled` for the 4-thread row); that output carries only mean latency, so the brpc P99 cells are left blank. The lyqtRpc column is a 30-second steady-state run.
+Method: the brpc column takes the median of its per-second samples (`-connection_type=single`, `pooled` for the 4-thread row); that output carries only mean latency, so the brpc P99 cells are left blank. The lyqtRpc column is a 30-second steady-state run (TCP: the steady section of `example/benchmark/run_benchmark.sh`; SHM: `example/shm/run_shm_benchmark.sh proto`; override the duration with `STEADY_SECS`).
 
 ### Single-thread latency & throughput
 
