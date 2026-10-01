@@ -140,11 +140,19 @@ endif()
 # FlatBuffers（SHM 零拷贝序列化适配层）
 # 优先使用项目本地安装，其次系统安装
 set(_fb_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../flatbuffers_install")
-set(_fb_inc     "${_fb_prefix}/include")
-set(_fb_flatc   "${_fb_prefix}/bin/flatc")
 
-if(NOT EXISTS "${_fb_flatc}")
-  # 尝试系统安装
+# 两个分支必须这样写，不能写成"先把 _fb_flatc/_fb_inc 赋成本地前缀路径，再在
+# if(NOT EXISTS) 里用 find_* 覆盖"：find_program/find_path 遇到已定义为非
+# NOTFOUND 的变量会直接跳过搜索，那样回退分支就是死代码。容器里正踩过这个坑——
+# Dockerfile 装了 flatbuffers-compiler，但 /src/flatbuffers_install 不存在
+# （COPY 只取 rpc/ 与 gateway/，而容器里 rpc 的上一级是 /src 而非仓库根），
+# 于是判定"未找到 FlatBuffers"，SHM FlatBuffers 示例被静默跳过，镜像里少 4 个
+# *_zc 二进制（33 → 37）。
+if(EXISTS "${_fb_prefix}/bin/flatc" AND EXISTS "${_fb_prefix}/include/flatbuffers/flatbuffers.h")
+  set(_fb_flatc "${_fb_prefix}/bin/flatc")
+  set(_fb_inc  "${_fb_prefix}/include")
+else()
+  # 回退系统安装
   find_program(_fb_flatc NAMES flatc)
   find_path(_fb_inc NAMES flatbuffers/flatbuffers.h PATHS /usr/include /usr/local/include)
 endif()

@@ -15,15 +15,11 @@
 **/*.a
 **/.cache
 rpc/docs
-# 宿主机侧的 FlatBuffers 安装前缀（rpc/CMakeLists.txt:142 的 _fb_prefix，即
+# 宿主机侧的 FlatBuffers 安装前缀（rpc/CMakeLists.txt 的 _fb_prefix，即
 # <repo>/flatbuffers_install），只服务宿主机构建，排除它不影响镜像：Dockerfile
 # 只 COPY rpc/ 与 gateway/，而容器里 rpc 的上一级是 /src 而不是仓库根，
-# 所以 /src/flatbuffers_install 从来就不存在。
-# 顺带记一个既有缺口（与这一行无关，加不加它都一样）：rpc/CMakeLists.txt:145-150
-# 那段"回退到系统安装"是死代码 —— _fb_flatc/_fb_inc 已被预设为"非 NOTFOUND"的
-# 值，find_program/find_path 会直接跳过搜索（用 cmake -P 复现过：两个都跳过），
-# 于是 builder 里装了 flatbuffers-compiler 也用不上，判定"未找到 FlatBuffers"
-# 后静默跳过 SHM FlatBuffers 示例：镜像里只有 33 个二进制，缺 5 个 *_zc。
+# 所以 /src/flatbuffers_install 从来就不存在——容器里 CMake 走系统回退分支，
+# 用镜像自带的 /usr/bin/flatc 与 /usr/include。
 /flatbuffers_install
 # 以下都是"仓库要留、但构建用不到"的产物。Dockerfile 的 COPY 只取 rpc/ 与
 # gateway/，这些在上下文里纯属搭便车，加起来又是 4MB 量级。
