@@ -246,11 +246,43 @@ namespace lcz_rpc
 
             LCZ_INFO("[ShmServer] worker %d started, epfd=%d", worker_id, w->epfd);
 
+            // 通知只是唤醒提示，真正的事实是 ring buffer 里的数据：
+            // 事件路径和超时路径都走同一个排空逻辑。
+            auto drain_requests = [&](const std::shared_ptr<ClientEntry> &entry)
+            {
+                while (entry->channel.read_request(body, type))
+                {
+                    auto msg = MessageFactory::create(type);
+                    if (msg && msg->unserialize(body))
+                    {
+                        msg->setMsgType(type);
+                        if (_cb_message)
+                            _cb_message(entry->conn, msg);
+                    }
+                }
+            };
+
             while (!token.stop_requested())
             {
                 int n = epoll_wait(w->epfd, events, MAX_EVENTS, 500);
                 if (n < 0)
                     break;
+
+                if (n == 0)
+                {
+                    // 通知丢失/写失败时不能等下一次通知（可能永远不来）：
+                    // 超时醒来的这一轮把已有请求排空，最多多 500ms 延迟。
+                    std::vector<std::shared_ptr<ClientEntry>> snapshot;
+                    {
+                        std::lock_guard<std::mutex> lk(w->mtx);
+                        snapshot.reserve(w->clients.size());
+                        for (auto &kv : w->clients)
+                            snapshot.push_back(kv.second);
+                    }
+                    for (auto &entry : snapshot)
+                        drain_requests(entry);
+                    continue;
+                }
 
                 for (int i = 0; i < n; ++i)
                 {
@@ -282,16 +314,7 @@ namespace lcz_rpc
                         uint64_t val;
                         ssize_t __attribute__((unused)) _rd = ::read(fd, &val, sizeof(val));
 
-                        while (entry->channel.read_request(body, type))
-                        {
-                            auto msg = MessageFactory::create(type);
-                            if (msg && msg->unserialize(body))
-                            {
-                                msg->setMsgType(type);
-                                if (_cb_message)
-                                    _cb_message(entry->conn, msg);
-                            }
-                        }
+                        drain_requests(entry);
                     }
                 }
             }

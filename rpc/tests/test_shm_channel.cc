@@ -9,6 +9,8 @@
 #include <gtest/gtest.h>
 #include <cstring>
 #include <memory>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <thread>
 #include <chrono>
 
@@ -579,4 +581,57 @@ TEST_F(ShmChannelTest, ClientMarksDeadAfterServerDestroyed) {
         dead = !client.connected();
     }
     EXPECT_TRUE(dead);
+}
+
+// 通知丢失时不依赖下一次通知：Server 在 500ms 超时轮询里也会排空 ring buffer
+TEST_F(ShmChannelTest, ServerDrainsWithoutNotify) {
+    lcz_rpc::ShmServer server("lcz_shm_test_notify_lost", "lcz_shm_test_lost",
+                              1024*1024, 1024*1024, 16, 1);
+    std::mutex mtx;
+    std::condition_variable cv;
+    bool handled = false;
+    server.setMessageCallback([&](const lcz_rpc::BaseConnection::ptr&,
+                                  lcz_rpc::BaseMessage::ptr&) {
+        std::lock_guard<std::mutex> lk(mtx);
+        handled = true;
+        cv.notify_one();
+    });
+    std::thread server_thread([&]() { server.start(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // 手工握手拿到通道，写完请求后故意不 write eventfd
+    int conn_fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    ASSERT_GE(conn_fd, 0);
+    struct sockaddr_un addr = {};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, "lcz_shm_test_notify_lost", sizeof(addr.sun_path) - 1);
+    ASSERT_EQ(::connect(conn_fd, reinterpret_cast<struct sockaddr *>(&addr), sizeof(addr)), 0);
+    int req_fd = -1, resp_fd = -1;
+    std::string shm_name;
+    ASSERT_TRUE(ShmChannel::handshake_client(conn_fd, req_fd, resp_fd, shm_name));
+    close(conn_fd);
+
+    ShmChannel ch;
+    ASSERT_TRUE(ch.open(shm_name));
+    ch.set_req_notify_fd(req_fd);
+    ch.set_resp_notify_fd(resp_fd);
+
+    auto req = lcz_rpc::MessageFactory::create<lcz_rpc::RpcRequest>();
+    req->setId("lost-notify-1");
+    req->setMethod("add");
+    Json::Value params;
+    params["num1"] = 1;
+    params["num2"] = 2;
+    req->setParams(params);
+    ASSERT_TRUE(ch.write_request(req->serialize(), lcz_rpc::MsgType::REQ_RPC));
+    // 故意不调用 ch.notify_req()
+
+    {
+        std::unique_lock<std::mutex> lk(mtx);
+        EXPECT_TRUE(cv.wait_for(lk, std::chrono::seconds(3), [&] { return handled; }));
+    }
+
+    ch.destroy();
+    server.stop();
+    server_thread.join();
 }
