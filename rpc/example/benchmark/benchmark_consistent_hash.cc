@@ -1,7 +1,7 @@
 // benchmark_consistent_hash.cc — 一致性哈希负载均衡微基准
 // 不依赖网络，直接压 MethodHost，量化四项指标：
 //   1) selectHost 单次延迟（CONSISTENT_HASH vs SOURCE_HASH vs ROUND_ROBIN）
-//   2) 哈希环构建耗时（appendHost 触发 160 虚拟节点全量重建，观察 O(N) 特征）
+//   2) 哈希环构建耗时（appendHost 只增量插入该主机自己的 160 个虚拟节点，逐台耗时基本持平）
 //   3) key 分布均衡性（10 台主机 10w key 的命中标准差 / max:min）
 //   4) 增删节点最小重映射（对比取模哈希 SOURCE_HASH，量化"~1/N vs ~(N-1)/N"）
 #include "src/client/rpc_registry.hpp"
@@ -55,7 +55,7 @@ namespace
 
     void benchRebuild()
     {
-        std::cout << "[2] 哈希环构建耗时（appendHost 触发 160 虚拟节点全量重建）\n";
+        std::cout << "[2] 哈希环构建耗时（每台 appendHost 只增量插入自己的 160 个虚拟节点）\n";
         MethodHost mh;
         for (int n = 1; n <= 10; ++n)
         {
@@ -63,7 +63,7 @@ namespace
             mh.appendHost(HostInfo("10.0.0." + std::to_string(n), 8080), 0);
             auto t1 = std::chrono::steady_clock::now();
             double us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
-            std::cout << "    第 " << std::setw(2) << n << " 台 appendHost（重建 160×" << n
+            std::cout << "    第 " << std::setw(2) << n << " 台 appendHost（增量插入 160"
                       << " 虚拟节点）: " << std::setw(6) << std::fixed << std::setprecision(1)
                       << us << " us\n";
         }

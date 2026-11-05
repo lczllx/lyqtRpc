@@ -1,6 +1,7 @@
 // MethodHost 一致性哈希负载均衡单元测试：确定性 / 分布 / 增删节点最小重映射
 #include <gtest/gtest.h>
 #include <algorithm>
+#include <chrono>
 #include <limits>
 #include <set>
 #include <string>
@@ -280,4 +281,73 @@ TEST(SelectHostsTest, EmptyKeyAndEmptyHosts)
     fillHosts(mh, 3);
     ASSERT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, ""), 3));
     ASSERT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::SOURCE_HASH, ""), 3));
+}
+
+// ===================== 环的增量维护（避免每次 appendHost 全量重建） =====================
+
+// 增量插入必须与全量重建得到同一个环：删掉最后一台再原样加回，
+// 删除走全量重建、加回走增量插入，最终选择结果应与持续 append 完全一致。
+TEST(ConsistentHashTest, IncrementalAppendMatchesRebuild)
+{
+    MethodHost mh;
+    fillHosts(mh, 6);
+    std::vector<std::string> keys;
+    std::vector<HostInfo> before;
+    for (int i = 0; i < 500; ++i)
+    {
+        std::string k = "k" + std::to_string(i);
+        keys.push_back(k);
+        before.push_back(mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, k).host);
+    }
+
+    mh.removeHost(HostInfo("10.0.0.6", 8080)); // 全量重建剩余 5 台的环
+    mh.appendHost(HostInfo("10.0.0.6", 8080), 0); // 只增量插入它的虚拟节点
+
+    for (size_t i = 0; i < keys.size(); ++i)
+    {
+        EXPECT_EQ(mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, keys[i]).host, before[i])
+            << "key=" << keys[i];
+    }
+    // 新加回的主机必须真的在环上：候选列表应覆盖全部 6 台
+    ASSERT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, "k1"), 6));
+}
+
+// 删除中间下标的主机：后续主机下标整体前移，环上映射必须跟着改写，
+// 否则候选里会出现被删主机或越界下标。
+TEST(ConsistentHashTest, RemoveMiddleHostShiftsRingIndexes)
+{
+    MethodHost mh;
+    fillHosts(mh, 6);
+    mh.removeHost(HostInfo("10.0.0.2", 8080));
+
+    std::set<HostInfo> expected;
+    for (int i : {1, 3, 4, 5, 6})
+        expected.insert(HostInfo("10.0.0." + std::to_string(i), 8080));
+
+    for (int k = 0; k < 100; ++k)
+    {
+        std::string key = "k" + std::to_string(k);
+        std::set<HostInfo> selected;
+        for (const auto &d : mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, key))
+            selected.insert(d.host);
+        EXPECT_EQ(selected, expected) << "key=" << key;
+        EXPECT_NE(mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, key).host,
+                  HostInfo("10.0.0.2", 8080));
+    }
+}
+
+// 批量追加是线性开销：旧实现每次 appendHost 都全量重建环，H 台总成本 O(H²·160)，
+// 300 台需 1s 量级；增量插入只写 300×160 个虚拟节点。阈值留足机器差异余量。
+TEST(ConsistentHashTest, AppendManyHostsIsLinear)
+{
+    constexpr int HOSTS = 300;
+    MethodHost mh;
+    auto t0 = std::chrono::steady_clock::now();
+    fillHosts(mh, HOSTS);
+    auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - t0)
+                          .count();
+    EXPECT_LT(elapsed_ms, 300) << "append " << HOSTS << " hosts took " << elapsed_ms << " ms";
+    // 环必须完整：候选列表覆盖全部主机
+    EXPECT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, "k"), HOSTS));
 }

@@ -33,7 +33,12 @@ namespace lcz_rpc
                     return;
                 }
                 _host.emplace_back(HostDetail{host,load});
-                rebuildRing();
+                // 新主机追加在末尾，已有主机的下标不变 ⇒ 只需插入它自己的虚拟节点。
+                // 逐台 append 的总开销因此是 O(H·VIRTUAL_NODES)，而不是每台都全量重建的 O(H²·VIRTUAL_NODES)。
+                if (_ring_built)
+                    insertNodes(_host.size() - 1);
+                else
+                    rebuildRing(); // 带 host 构造的实例环还没建：一次性补齐，与旧行为一致
             }
             // 按指定策略从主机列表中选一个（单次选择不构造候选列表，保持热路径无分配）
             HostDetail selectHost(LoadBalanceStrategy strategy, const std::string &key = {})
@@ -219,18 +224,22 @@ namespace lcz_rpc
                 std::shuffle(order.begin(), order.end(), _rng);
                 for (size_t idx : order) out.push_back(_host[idx]);
             }
-            // 重建哈希环（调用方必须已持有 _mutex）
+            // 把第 i 台主机的虚拟节点插入环（调用方必须已持有 _mutex）
+            void insertNodes(size_t i)
+            {
+                std::string hk = hostKey(_host[i].host);
+                for (int v = 0; v < VIRTUAL_NODES; ++v)
+                {
+                    _ring[_hash(hk + "#" + std::to_string(v))] = i;
+                }
+            }
+            // 全量重建哈希环（调用方必须已持有 _mutex）
             void rebuildRing()
             {
                 _ring.clear();
                 for (size_t i = 0; i < _host.size(); ++i)
-                {
-                    std::string hk = hostKey(_host[i].host);
-                    for (int v = 0; v < VIRTUAL_NODES; ++v)
-                    {
-                        _ring[_hash(hk + "#" + std::to_string(v))] = i;
-                    }
-                }
+                    insertNodes(i);
+                _ring_built = true;
             }
             // 移除指定主机
             void removeHost(const HostInfo &host)
@@ -245,6 +254,8 @@ namespace lcz_rpc
                 if (it != _host.end())
                 {
                     _host.erase(it);
+                    // erase 会让后面主机的下标整体前移，环里所有大于被删下标的映射都要改写，
+                    // 全量重建比逐个平移简单且不会漏；下线通知是低频事件，这点开销可接受。
                     rebuildRing();
                 }
             }
@@ -270,6 +281,7 @@ namespace lcz_rpc
             uint64_t _idx;//轮询索引 类型uint64_t防止溢出
             std::vector<HostDetail> _host;
             std::map<size_t, size_t> _ring;//一致性哈希环: hash(虚拟节点) -> _host 下标
+            bool _ring_built = false;//环是否已建（带 host 构造的实例首次 append 时才建）
             std::mt19937 _rng;//随机数生成器
             std::hash<std::string> _hash;//hash函数
             //std::uniform_int_distribution<size_t> _dist;//随机数分布
