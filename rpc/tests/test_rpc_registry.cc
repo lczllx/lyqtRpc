@@ -6,6 +6,9 @@
 #include <string>
 #include <vector>
 #include "src/server/rpc_registry.hpp"
+#include "src/client/rpc_registry.hpp"
+#include "src/client/requestor.hpp"
+#include "src/general/fields.hpp"
 #include "src/server/memory_registry_store.hpp"
 #include "src/general/abstract.hpp"
 
@@ -253,4 +256,64 @@ TEST(PwithDManagerTest, SweepNotifiesOffline)
     ASSERT_NE(notify, nullptr);
     EXPECT_EQ(notify->optype(), ServiceOpType::OFFLINE);
     EXPECT_EQ(notify->host(), host);
+}
+
+// ===================== Discover（客户端缓存） =====================
+
+namespace
+{
+    // 收到请求后同步回包；可在回包前插入其他事件（如 ONLINE 推送）
+    class RespondingConnection : public BaseConnection
+    {
+    public:
+        std::function<void(const BaseMessage::ptr &)> on_send;
+        void send(const BaseMessage::ptr &msg) override { if (on_send) on_send(msg); }
+        void shutdown() override {}
+        bool connected() override { return true; }
+        std::string peerAddress() const override { return "responding:1"; }
+    };
+}
+
+// 在途发现响应不得覆盖请求期间到达的 ONLINE 状态
+TEST(DiscoverClientTest, OnlineDuringDiscoveryIsNotOverwritten)
+{
+    auto requestor = std::make_shared<lcz_rpc::client::Requestor>();
+    auto conn = std::make_shared<RespondingConnection>();
+    std::shared_ptr<lcz_rpc::client::Discover> discover;
+    bool injected = false;
+
+    conn->on_send = [&](const BaseMessage::ptr &msg) {
+        auto req = std::dynamic_pointer_cast<ServiceRequest>(msg);
+        if (!req) return;
+
+        // 模拟注册中心在本请求在途期间推来 ONLINE
+        if (!injected) {
+            injected = true;
+            discover->onserviceRequest(conn,
+                makeServiceReq(ServiceOpType::ONLINE, "echo", HostInfo("10.0.0.2", 2222), 0));
+        }
+
+        // 发现响应是请求时刻的快照，只含旧主机
+        auto resp = MessageFactory::create<ServiceResponse>();
+        resp->setId(req->rid());
+        resp->setRcode(RespCode::SUCCESS);
+        resp->setOptype(ServiceOpType::DISCOVER);
+        resp->setHostDetails({lcz_rpc::HostDetail{HostInfo("10.0.0.1", 1111), 1}});
+        BaseMessage::ptr base = resp;
+        requestor->onResponse(conn, base);
+    };
+
+    discover = std::make_shared<lcz_rpc::client::Discover>(
+        requestor, [](const HostInfo &) {});
+
+    lcz_rpc::HostDetail detail;
+    ASSERT_TRUE(discover->serviceDiscover(
+        conn, "echo", detail, lcz_rpc::LoadBalanceStrategy::ROUND_ROBIN, true));
+    EXPECT_EQ(detail.host, HostInfo("10.0.0.2", 2222));
+
+    // 缓存命中再选：仍应看到 ONLINE 推来的主机
+    lcz_rpc::HostDetail again;
+    ASSERT_TRUE(discover->serviceDiscover(
+        conn, "echo", again, lcz_rpc::LoadBalanceStrategy::ROUND_ROBIN));
+    EXPECT_EQ(again.host, HostInfo("10.0.0.2", 2222));
 }

@@ -375,8 +375,22 @@ namespace lcz_rpc
                  for (const auto &detail : details) {
                      method_host->appendHost(detail.host, detail.load);
                  }
-                 detail=method_host->selectHost(strategy, key);
-                 _method_host[method]=method_host; // 缓存新获取的主机列表以供后续复用
+
+                 // 并发下另一线程可能已先写入缓存，或在请求在途期间收到了 ONLINE 推送。
+                 // 二次检查后复用已有列表：在途响应是旧快照，覆盖它会丢掉更新的主机状态。
+                 MethodHost::ptr cached;
+                 {
+                     std::unique_lock<std::mutex> lock(_mutex);
+                     auto it = _method_host.find(method);
+                     if (it != _method_host.end())
+                         cached = it->second;
+                     else
+                     {
+                         cached = method_host;
+                         _method_host[method] = cached;
+                     }
+                 }
+                 detail=cached->selectHost(strategy, key);
                  LCZ_INFO("[discover-cache] method=%s host=%s:%d load=%d",
                     method.c_str(),
                     detail.host.first.c_str(),
