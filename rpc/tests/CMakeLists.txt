@@ -18,7 +18,6 @@
 #   test_metrics.cc             Prometheus 指标内存模型（Counter/Gauge/Histogram/导出格式）
 #   test_metrics_server.cc      /metrics HTTP 端点起停 + process_* 采集
 #   test_memory_circuit_store.cc  熔断状态内存存储 save/load/remove
-#   test_async_circuit_store.cc   异步熔断存储：缓存/穿透/刷盘/去重/删除/析构
 #   test_circuit_breaker.cc        NodeBreaker 状态机 + CircuitBreaker 管理/持久化
 #   test_memory_registry_store.cc  Provider 注册/发现/负载/心跳/扫描/断开
 #   test_dispacher.cc              按 MsgType 派发到类型化 handler，未知类型关连接
@@ -42,7 +41,6 @@ add_executable(lcz_rpc_unit_tests
   test_metrics.cc
   test_metrics_server.cc
   test_memory_circuit_store.cc
-  test_async_circuit_store.cc
   test_circuit_breaker.cc
   test_memory_registry_store.cc
   test_dispacher.cc

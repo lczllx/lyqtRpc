@@ -119,9 +119,9 @@ namespace lcz_rpc
                 conn->setSender([weak_entry = std::weak_ptr<ClientEntry>(entry)](const BaseMessage::ptr &msg)
                                 {
                 auto entry = weak_entry.lock();
-                if (!entry) return; // 连接已销毁，通道句柄失效，丢弃响应
+                if (!entry) return false; // 连接已销毁，通道句柄失效，丢弃响应
                 auto resp = std::dynamic_pointer_cast<RpcResponse>(msg);
-                if (!resp) return;
+                if (!resp) return false;
                 flatbuffers::FlatBufferBuilder builder(256);
                 auto id = builder.CreateString(resp->rid());
                 int rcode = static_cast<int>(resp->rcode());
@@ -132,8 +132,13 @@ namespace lcz_rpc
                 builder.Finish(fb::CreateRpcResponse(builder, id, rcode, rv));
                 std::string body(reinterpret_cast<const char*>(builder.GetBufferPointer()),
                                  builder.GetSize());
-                entry->channel.write_response(body, MsgType::RSP_RPC_FLAT);
-                entry->channel.notify_resp(); });
+                if (!entry->channel.write_response(body, MsgType::RSP_RPC_FLAT))
+                {
+                    LCZ_ERROR("[ShmServerZc] write_response failed, response dropped, id=%s", msg->rid().c_str());
+                    return false;
+                }
+                entry->channel.notify_resp();
+                return true; });
                 entry->conn = conn;
                 if (_cb_connection)
                     _cb_connection(conn);
@@ -202,11 +207,59 @@ namespace lcz_rpc
             struct epoll_event events[MAX];
             std::string body;
             MsgType type;
+            // 通知只是唤醒提示，超时轮询也排空一次，避免丢失通知后请求永久挂起
+            auto drain_requests = [&](const std::shared_ptr<ClientEntry> &entry)
+            {
+                while (entry->channel.read_request(body, type))
+                {
+                    if (type != MsgType::REQ_RPC_FLAT)
+                        continue;
+                    ShmZcReader reader(body);
+                    auto *req = reader.as<fb::RpcRequest>();
+                    if (!req)
+                        continue;
+                    auto json_req = MessageFactory::create<RpcRequest>();
+                    json_req->setId(ShmZcReader::strval(req->id()));
+                    json_req->setMethod(ShmZcReader::strval(req->method()));
+                    json_req->setTraceId(ShmZcReader::strval(req->trace_id()));
+                    json_req->setSpanId(ShmZcReader::strval(req->span_id()));
+                    json_req->setMsgType(MsgType::REQ_RPC);
+                    if (req->params() && req->params()->size() > 0)
+                    {
+                        std::string ps(reinterpret_cast<const char *>(req->params()->data()),
+                                       req->params()->size());
+                        Json::Value pv;
+                        if (JSON::deserialize(ps, pv))
+                            json_req->setParams(pv);
+                    }
+                    if (_cb_message)
+                    {
+                        BaseMessage::ptr bm = json_req;
+                        _cb_message(entry->conn, bm);
+                    }
+                }
+            };
+
             while (!token.stop_requested())
             {
                 int n = epoll_wait(w->epfd, events, MAX, 500);
                 if (n < 0)
                     break;
+
+                if (n == 0)
+                {
+                    std::vector<std::shared_ptr<ClientEntry>> snapshot;
+                    {
+                        std::lock_guard<std::mutex> lk(w->mtx);
+                        snapshot.reserve(w->clients.size());
+                        for (auto &kv : w->clients)
+                            snapshot.push_back(kv.second);
+                    }
+                    for (auto &entry : snapshot)
+                        drain_requests(entry);
+                    continue;
+                }
+
                 for (int i = 0; i < n; ++i)
                 {
                     int fd = events[i].data.fd;
@@ -233,34 +286,7 @@ namespace lcz_rpc
                             continue;
                         uint64_t val;
                         (void)::read(fd, &val, sizeof(val));
-                        while (entry->channel.read_request(body, type))
-                        {
-                            if (type != MsgType::REQ_RPC_FLAT)
-                                continue;
-                            ShmZcReader reader(body);
-                            auto *req = reader.as<fb::RpcRequest>();
-                            if (!req)
-                                continue;
-                            auto json_req = MessageFactory::create<RpcRequest>();
-                            json_req->setId(ShmZcReader::strval(req->id()));
-                            json_req->setMethod(ShmZcReader::strval(req->method()));
-                            json_req->setTraceId(ShmZcReader::strval(req->trace_id()));
-                            json_req->setSpanId(ShmZcReader::strval(req->span_id()));
-                            json_req->setMsgType(MsgType::REQ_RPC);
-                            if (req->params() && req->params()->size() > 0)
-                            {
-                                std::string ps(reinterpret_cast<const char *>(req->params()->data()),
-                                               req->params()->size());
-                                Json::Value pv;
-                                if (JSON::deserialize(ps, pv))
-                                    json_req->setParams(pv);
-                            }
-                            if (_cb_message)
-                            {
-                                BaseMessage::ptr bm = json_req;
-                                _cb_message(entry->conn, bm);
-                            }
-                        }
+                        drain_requests(entry);
                     }
                 }
             }

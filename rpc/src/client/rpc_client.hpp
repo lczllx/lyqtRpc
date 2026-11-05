@@ -15,7 +15,6 @@
 #include "general/log_system/lcz_log.h"
 #include "general/metrics_hooks.hpp"
 #include "server/memory_circuit_store.hpp"
-#include "server/etcd_circuit_store.hpp"
 
 namespace lcz_rpc
 {
@@ -417,7 +416,9 @@ namespace lcz_rpc
             }
 
         private:
-            // 根据环境变量 LCZ_ETCD 创建熔断器存储后端
+            // 断路器状态只保存在进程内。Etcd 后端已删除：它按实例做 key、
+            // 依赖 LWW 且只在首次访问时懒加载，无法提供多实例共享语义，
+            // 反而在调用线程上同步跑 3s curl，且 save 失败被忽略。
             static CircuitBreaker::ptr makeBreaker()
             {
                 CircuitConfig cfg;
@@ -426,15 +427,6 @@ namespace lcz_rpc
                 if ((env = std::getenv("LCZ_CB_OPEN_DURATION")))    cfg.open_duration_sec = std::atoi(env);
                 if ((env = std::getenv("LCZ_CB_HALF_OPEN_MAX")))    cfg.half_open_max_req = std::atoi(env);
 
-                const char *etcd_url = std::getenv("LCZ_ETCD");
-                if (etcd_url && etcd_url[0] != '\0')
-                {
-                    LCZ_INFO("[RpcClient] 使用 Etcd 存储断路器状态，etcd=%s", etcd_url);
-                    return std::make_shared<CircuitBreaker>(
-                        cfg,
-                        std::make_shared<lcz_rpc::server::EtcdCircuitStore>(etcd_url));
-                }
-                LCZ_INFO("[RpcClient] 使用内存存储断路器状态");
                 return std::make_shared<CircuitBreaker>(
                     cfg,
                     std::make_shared<lcz_rpc::server::MemoryCircuitStore>());

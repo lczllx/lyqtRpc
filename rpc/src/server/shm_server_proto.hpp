@@ -114,18 +114,23 @@ namespace lcz_rpc
                 conn->setSender([weak_entry = std::weak_ptr<ClientEntry>(entry)](const BaseMessage::ptr &msg)
                                 {
                 auto entry = weak_entry.lock();
-                if (!entry) return; // 连接已销毁，通道句柄失效，丢弃响应
+                if (!entry) return false; // 连接已销毁，通道句柄失效，丢弃响应
                 auto resp = std::dynamic_pointer_cast<ProtoRpcResponse>(msg);
-                if (!resp) return;
+                if (!resp) return false;
                 std::span<char> buf = entry->channel.resp_write_ptr();
                 if (!buf.empty() && buf.size() >= resp->byteSize()) {
                     resp->serializeToArray(buf);
                     entry->channel.resp_commit(resp->byteSize(), MsgType::RSP_RPC_PROTO);
                 } else {
                     std::string body = resp->serialize();
-                    entry->channel.write_response(body, MsgType::RSP_RPC_PROTO);
+                    if (!entry->channel.write_response(body, MsgType::RSP_RPC_PROTO))
+                    {
+                        LCZ_ERROR("[ShmServerProto] write_response failed, response dropped, id=%s", msg->rid().c_str());
+                        return false;
+                    }
                 }
-                entry->channel.notify_resp(); });
+                entry->channel.notify_resp();
+                return true; });
                 entry->conn = conn;
                 if (_cb_connection)
                     _cb_connection(conn);
