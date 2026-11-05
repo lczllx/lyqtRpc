@@ -152,12 +152,15 @@ namespace lcz_rpc
 
                 // 设置超时定时器：muduo runAfter 到期后跨线程回调 onTimeout
                 auto* muduo_conn = dynamic_cast<MuduoConnection*>(conn.get());
+                muduo::net::TimerId tid;
+                bool has_timer = false;
                 if(muduo_conn && muduo_conn->getLoop())
                 {
                     double timeout_sec = timeout.count() / 1000.0;
                     std::string req_id = req->rid();
-                    muduo::net::TimerId tid = muduo_conn->getLoop()->runAfter(timeout_sec,
+                    tid = muduo_conn->getLoop()->runAfter(timeout_sec,
                         [this, req_id]() { this->onTimeout(req_id); });
+                    has_timer = true;
                     {
                         std::unique_lock<std::mutex> lock(_mutex);
                         req_desc->timer_id = tid;
@@ -169,7 +172,14 @@ namespace lcz_rpc
                     LCZ_WARN("无法获取 EventLoop，超时机制不可用: id=%s", req->rid().c_str());
                 }
 
-                conn->send(req);//异步请求发送
+                if (!conn->send(req)) //异步请求发送；没进传输层就直接失败，不等 5s 超时
+                {
+                    LCZ_ERROR("请求发送失败: id=%s", req->rid().c_str());
+                    if(has_timer)
+                        muduo_conn->getLoop()->cancel(tid);
+                    delDesc(req->rid());
+                    return false;
+                }
                 async_resp= req_desc->response.get_future();//获取关联的future对象
                 return true;
             }
@@ -214,7 +224,12 @@ namespace lcz_rpc
                     LCZ_ERROR("构造请求描述对象失败！");
                     return false;
                 }
-                conn->send(req);
+                if (!conn->send(req))
+                {
+                    LCZ_ERROR("回调请求发送失败: id=%s", req->rid().c_str());
+                    delDesc(req->rid());
+                    return false;
+                }
                 return true;
             }
             private:

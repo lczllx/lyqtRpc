@@ -24,7 +24,7 @@ namespace
     public:
         Requestor::ptr requestor;
         bool echo = false;
-        void send(const BaseMessage::ptr &msg) override
+        bool send(const BaseMessage::ptr &msg) override
         {
             if (echo && requestor)
             {
@@ -34,6 +34,7 @@ namespace
                 BaseMessage::ptr r = resp;
                 requestor->onResponse(shared_from_this(), r);
             }
+            return true;
         }
         void shutdown() override {}
         bool connected() override { return true; }

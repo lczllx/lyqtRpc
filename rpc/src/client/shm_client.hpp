@@ -77,7 +77,7 @@ namespace lcz_rpc
             auto conn = std::make_shared<ShmConnection>();
             conn->setName("shm_client_" + _shm_name);
             conn->setSender([this](const BaseMessage::ptr &msg)
-                            { send(msg); });
+                            { return send(msg); });
             _conn = conn;
             if (_cb_connection)
                 _cb_connection(conn);

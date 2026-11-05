@@ -19,7 +19,8 @@ namespace
     class FakeConnection : public BaseConnection
     {
     public:
-        void send(const BaseMessage::ptr &) override {}
+        bool send_ok = true;
+        bool send(const BaseMessage::ptr &) override { return send_ok; }
         void shutdown() override {}
         bool connected() override { return true; }
         std::string peerAddress() const override { return "10.0.0.1:8080"; }
@@ -58,6 +59,22 @@ TEST(RequestorTest, OnResponseSetsFuture)
 
     ASSERT_EQ(fut.wait_for(std::chrono::seconds(0)), std::future_status::ready);
     EXPECT_EQ(fut.get()->rid(), "rid-1");
+}
+
+// 传输层拒绝发送（如 SHM ring 满）：send 立即返回 false，而不是等超时
+TEST(RequestorTest, SendFailureReturnsFalseImmediately)
+{
+    Requestor req;
+    auto conn = std::make_shared<FakeConnection>();
+    conn->send_ok = false;
+    auto req_msg = makeRpcRequest("rid-send-fail");
+
+    auto start = std::chrono::steady_clock::now();
+    BaseMessage::ptr resp;
+    EXPECT_FALSE(req.send(conn, req_msg, resp, std::chrono::seconds(5)));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+    EXPECT_LT(elapsed, 1000);
 }
 
 // onResponse 收到未知 rid → 忽略，不崩溃

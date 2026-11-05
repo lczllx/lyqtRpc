@@ -150,10 +150,16 @@ namespace lcz_rpc
                 conn->setSender([weak_entry = std::weak_ptr<ClientEntry>(entry)](const BaseMessage::ptr &msg)
                                 {
                 auto entry = weak_entry.lock();
-                if (!entry) return; // 连接已销毁，通道句柄失效，丢弃响应
+                if (!entry) return false; // 连接已销毁，通道句柄失效，丢弃响应
                 std::string body = msg->serialize();
-                entry->channel.write_response(body, msg->msgType());
-                entry->channel.notify_resp(); });
+                if (!entry->channel.write_response(body, msg->msgType()))
+                {
+                    // 写失败时不能 notify：客户端等不到这条响应，只能等到超时
+                    LCZ_ERROR("[ShmServer] write_response failed, response dropped, id=%s", msg->rid().c_str());
+                    return false;
+                }
+                entry->channel.notify_resp();
+                return true; });
                 entry->conn = conn;
 
                 if (_cb_connection)

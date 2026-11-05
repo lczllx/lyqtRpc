@@ -401,16 +401,21 @@ TEST_F(ShmChannelTest, SimulatedCrossProcess) {
 // §6 ShmConnection：虚拟连接句柄
 // =============================================================================
 
-// send() 将消息转发到注入的 _sender 回调
+// send() 将消息转发到注入的 _sender 回调，并把回调结果原样返回
 TEST_F(ShmChannelTest, ShmConnectionSendDelegates) {
     lcz_rpc::ShmConnection conn;
     bool called = false;
-    conn.setSender([&](const lcz_rpc::BaseMessage::ptr&) { called = true; });
+    bool send_ok = true;
+    conn.setSender([&](const lcz_rpc::BaseMessage::ptr&) { called = true; return send_ok; });
 
     // 构造一个最简单的消息
     auto msg = lcz_rpc::MessageFactory::create(lcz_rpc::MsgType::REQ_RPC);
-    conn.send(msg);
+    EXPECT_TRUE(conn.send(msg));
     EXPECT_TRUE(called);
+
+    // 底层写失败必须冒泡，调用方才能 fail fast
+    send_ok = false;
+    EXPECT_FALSE(conn.send(msg));
 }
 
 // connected() 始终为 true（SHM 通道打开即视为连接）

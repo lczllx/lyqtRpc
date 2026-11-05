@@ -23,7 +23,7 @@ namespace lcz_rpc
     {
     public:
         using ptr = std::shared_ptr<ShmConnection>;
-        using Sender = std::function<void(const BaseMessage::ptr &)>;
+        using Sender = std::function<bool(const BaseMessage::ptr &)>;
 
         // 注入写回调：Server 注入 write_response，Client 注入 send
         void setSender(Sender s) { _sender = std::move(s); }
@@ -31,10 +31,9 @@ namespace lcz_rpc
 
         // ====== BaseConnection 接口 ======
         // Router 处理完业务调 conn->send(resp)，最终走到 _sender → 写 ring buffer
-        void send(const BaseMessage::ptr &msg) override
+        bool send(const BaseMessage::ptr &msg) override
         {
-            if (_sender)
-                _sender(msg);
+            return _sender ? _sender(msg) : false;
         }
         void shutdown() override {}                // SHM 没有连接可关
         bool connected() override { return true; } // SHM 通道打开即视为已连接

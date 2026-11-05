@@ -19,7 +19,7 @@ namespace
     class MockConnection : public BaseConnection
     {
     public:
-        void send(const BaseMessage::ptr &) override {}
+        bool send(const BaseMessage::ptr &) override { return true; }
         void shutdown() override {}
         bool connected() override { return true; }
         std::string peerAddress() const override { return "mock"; }

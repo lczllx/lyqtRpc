@@ -66,8 +66,8 @@ namespace lcz_rpc {
     class BaseConnection {
     public:
         using ptr = std::shared_ptr<BaseConnection>;
-        // 发送消息
-        virtual void send(const BaseMessage::ptr &msg) = 0;
+        // 发送消息；返回 false 表示消息没有进入传输层，调用方不应等待响应
+        virtual bool send(const BaseMessage::ptr &msg) = 0;
         // 关闭连接
         virtual void shutdown() = 0;
         // 检查连接状态

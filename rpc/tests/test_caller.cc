@@ -30,10 +30,12 @@ namespace
         RespCode rcode = RespCode::SUCCESS;
         Json::Value result;
         int send_count = 0;
+        bool send_ok = true;
 
-        void send(const BaseMessage::ptr &msg) override
+        bool send(const BaseMessage::ptr &msg) override
         {
             ++send_count;
+            if (!send_ok) return false;
             if (echo && requestor)
             {
                 auto resp = MessageFactory::create<RpcResponse>();
@@ -43,6 +45,7 @@ namespace
                 BaseMessage::ptr r = resp;
                 requestor->onResponse(shared_from_this(), r);
             }
+            return true;
         }
         void shutdown() override {}
         bool connected() override { return true; }

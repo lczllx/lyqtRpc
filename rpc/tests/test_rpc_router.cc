@@ -31,7 +31,7 @@ namespace
     {
     public:
         std::vector<BaseMessage::ptr> sent;
-        void send(const BaseMessage::ptr &msg) override { sent.push_back(msg); }
+        bool send(const BaseMessage::ptr &msg) override { sent.push_back(msg); return true; }
         void shutdown() override {}
         bool connected() override { return true; }
         std::string peerAddress() const override { return "rec:1"; }

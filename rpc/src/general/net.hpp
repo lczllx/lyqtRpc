@@ -195,11 +195,12 @@ namespace lcz_rpc
             _protocol = protocol;
          }
          // 将消息序列化后通过底层 TcpConnection 发送
-          virtual void send(const BaseMessage::ptr &msg)override
+          virtual bool send(const BaseMessage::ptr &msg)override
           {
-            if (!_connection->connected()) return;
+            if (!_connection->connected()) return false;
             std::string data=_protocol->serialize(msg);
             _connection->send(data);
+            return true;
           }
           // 关闭底层 TCP 连接
           virtual void shutdown()override

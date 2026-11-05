@@ -20,7 +20,7 @@ namespace
     {
     public:
         int shutdown_count = 0;
-        void send(const BaseMessage::ptr &) override {}
+        bool send(const BaseMessage::ptr &) override { return true; }
         void shutdown() override { ++shutdown_count; }
         bool connected() override { return true; }
         std::string peerAddress() const override { return "rec:1"; }
