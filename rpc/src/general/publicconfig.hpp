@@ -60,7 +60,7 @@ namespace lcz_rpc
         TIMEOUT,          // 等待响应超时 → 可重试
         CONN_CLOSED,      // 连接未建立/已断开 → 可重试
         CIRCUIT_OPEN,     // 熔断器打开拒绝 → 可重试（换 host 绕过）
-        BACKOFF,          // 服务端限流退避 → 可重试
+        BACKOFF,          // 服务端限流 / 本地发送队列满 → 可重试
         SERVICE_ERROR,    // 服务端业务/协议错误（SERVICE_NOT_FOUND/INVALID_PARAMS/PARSE_FAILED 等）→ 不可重试
     };
     // 判断错误是否可重试（瞬时故障可重试，业务错误不可重试）

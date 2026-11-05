@@ -364,7 +364,8 @@ namespace lcz_rpc
                             result = std::move(fut);
                             return true;
                         }
-                        // sent==false：err 已由 call 填充（熔断拒绝=CIRCUIT_OPEN，发送失败=TIMEOUT）
+                        // sent==false：err 已由 call 填充（熔断拒绝=CIRCUIT_OPEN，
+                        // 发送失败=CONN_CLOSED，本地队列满=BACKOFF）
                         // 未就绪：超时，需要换 host 重试
                         if (sent) err = RpcError::TIMEOUT;
                     }

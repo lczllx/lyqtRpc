@@ -635,3 +635,87 @@ TEST_F(ShmChannelTest, ServerDrainsWithoutNotify) {
     server.stop();
     server_thread.join();
 }
+
+// -----------------------------------------------------------------------------
+// §背压：ring 满时有界等待，而不是空转 3 次立即失败
+// -----------------------------------------------------------------------------
+
+// 满环 + 有等待预算：必须真的等到预算耗尽才失败（旧实现是 3 次空转，几乎立即返回）
+TEST_F(ShmChannelTest, FullRingWaitsBudgetBeforeFailing) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 1024, 1024));
+    std::string big(900, 'a'); // frame_len = 908，剩余 116B 放不下第二帧
+    ASSERT_TRUE(ch.write_request(big, MsgType::REQ_RPC_PROTO, 0));
+
+    auto t0 = std::chrono::steady_clock::now();
+    EXPECT_FALSE(ch.write_request(big, MsgType::REQ_RPC_PROTO, 60));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - t0).count();
+    EXPECT_GE(elapsed, 50); // 预算 60ms，留 10ms 调度余量
+    ch.destroy();
+}
+
+// 预算为 0 时保持快速失败（服务端响应方向用这种模式，避免拖住 worker）
+TEST_F(ShmChannelTest, FullRingZeroWaitFailsFast) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 1024, 1024));
+    std::string big(900, 'a');
+    ASSERT_TRUE(ch.write_request(big, MsgType::REQ_RPC_PROTO, 0));
+
+    auto t0 = std::chrono::steady_clock::now();
+    EXPECT_FALSE(ch.write_request(big, MsgType::REQ_RPC_PROTO, 0));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - t0).count();
+    EXPECT_LT(elapsed, 50);
+    ch.destroy();
+}
+
+// 等待期间消费者腾出空间：写入应当成功，而不是像旧实现那样直接丢掉
+TEST_F(ShmChannelTest, WaitingProducerSucceedsAfterConsumerDrains) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 1024, 1024));
+    // 1018B 帧占满 1024B 环形区，连 12B 小帧都放不下，才能逼出生等待
+    std::string big(1010, 'a');
+    ASSERT_TRUE(ch.write_request(big, MsgType::REQ_RPC_PROTO, 0));
+
+    std::jthread consumer([&ch] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+        std::string body;
+        MsgType type;
+        ch.read_request(body, type);
+    });
+
+    auto t0 = std::chrono::steady_clock::now();
+    EXPECT_TRUE(ch.write_request("next", MsgType::REQ_RPC_PROTO, 500));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - t0).count();
+    EXPECT_GE(elapsed, 30); // 确实等到了消费者，而不是一次就写进去
+    consumer.join();
+    ch.destroy();
+}
+
+// 单帧超过 ring 容量：立即失败，不能把配置错误伪装成「等了预算才超时」
+TEST_F(ShmChannelTest, OversizeFrameFailsImmediately) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 1024, 1024));
+    std::string huge(2000, 'x');
+
+    auto t0 = std::chrono::steady_clock::now();
+    EXPECT_FALSE(ch.write_request(huge, MsgType::REQ_RPC_PROTO, 1000));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - t0).count();
+    EXPECT_LT(elapsed, 100); // 预算 1s，但装不下应立即返回
+
+    // 失败后 ring 仍可用
+    ASSERT_TRUE(ch.write_request("ok", MsgType::REQ_RPC_PROTO, 0));
+    std::string body;
+    MsgType type;
+    ASSERT_TRUE(ch.read_request(body, type));
+    EXPECT_EQ(body, "ok");
+    ch.destroy();
+}
+
+// 默认段大小从 64MB 降到 8MB（按 64 客户端算，单方向常驻页从 4GB 降到 512MB）
+TEST(ShmConfigTest, DefaultBufferIsEightMB) {
+    EXPECT_EQ(lcz_rpc::SHM_DEFAULT_BUF_SIZE, 8u * 1024 * 1024);
+}

@@ -57,13 +57,15 @@ namespace lcz_rpc
                 req_msg->setTraceId(uuid()); // 分布式追踪：根 trace_id
                 req_msg->setSpanId(uuid());  // 根 span：当前调用跨度 ID（真实 uuid，非占位）
                 BaseMessage::ptr resp_msg;
-                bool ret = _requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), resp_msg, timeout);
+                RpcError send_err = RpcError::TIMEOUT;
+                bool ret = _requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), resp_msg, timeout, &send_err);
                 if (!ret)
                 {
-                    LCZ_ERROR("rpc同步请求失败");
-                    if (_breaker)
+                    LCZ_ERROR("rpc同步请求失败: err=%d", static_cast<int>(send_err));
+                    // 本地队列满/载荷错误不代表远端不健康，不能计入熔断
+                    if (_breaker && isHostSendFailure(send_err))
                         _breaker->onFailure(method_name, host);
-                    if (err) *err = RpcError::TIMEOUT;
+                    if (err) *err = send_err;
                     return false;
                 }
                 RpcResponse::ptr rpc_respmsg = std::dynamic_pointer_cast<RpcResponse>(resp_msg);
@@ -117,12 +119,13 @@ namespace lcz_rpc
                 result = json_pomise->get_future();                               /// 创建 Promise-Future 对，通过 get_future() 连接
 
                 Requestor::ReqCallback cb = std::bind(&RpcCaller::callBack, this, json_pomise, method_name,host,std::placeholders::_1);
-                bool ret = _requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), cb);
+                RpcError send_err = RpcError::TIMEOUT;
+                bool ret = _requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), cb, &send_err);
                 if (!ret)
                 {
-                    LCZ_ERROR("rpc异步请求失败");
-                    if (err) *err = RpcError::TIMEOUT;
-                    if (_breaker)
+                    LCZ_ERROR("rpc异步请求失败: err=%d", static_cast<int>(send_err));
+                    if (err) *err = send_err;
+                    if (_breaker && isHostSendFailure(send_err))
                         _breaker->onFailure(method_name, host);
                     return false;
                 }
@@ -151,11 +154,12 @@ namespace lcz_rpc
                 BaseMessage::ptr resp_msg;
 
                 Requestor::ReqCallback reqcb = std::bind(&RpcCaller::callBackself, this, cb,method_name,host, std::placeholders::_1);
-                bool ret = _requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), reqcb);
+                RpcError send_err = RpcError::TIMEOUT;
+                bool ret = _requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), reqcb, &send_err);
                 if (!ret)
                 {
-                    LCZ_ERROR("rpc回调请求失败");
-                    if (_breaker)
+                    LCZ_ERROR("rpc回调请求失败: err=%d", static_cast<int>(send_err));
+                    if (_breaker && isHostSendFailure(send_err))
                         _breaker->onFailure(method_name, host);
                     return false;
                 }
@@ -253,12 +257,13 @@ namespace lcz_rpc
                 req_msg->setBody(body);
 
                 BaseMessage::ptr resp_msg;
-                if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), resp_msg, timeout))
+                RpcError send_err = RpcError::TIMEOUT;
+                if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), resp_msg, timeout, &send_err))
                 {
-                    LCZ_ERROR("call_proto sync send failed");
-                    if (error_code) *error_code = "send_failed";
-                    if (err) *err = RpcError::TIMEOUT;
-                    if (_breaker) _breaker->onFailure(method_name, host);
+                    LCZ_ERROR("call_proto sync send failed: err=%d", static_cast<int>(send_err));
+                    if (error_code) *error_code = (send_err == RpcError::BACKOFF) ? "queue_full" : "send_failed";
+                    if (err) *err = send_err;
+                    if (_breaker && isHostSendFailure(send_err)) _breaker->onFailure(method_name, host);
                     return false;
                 }
                 auto proto_resp = std::dynamic_pointer_cast<ProtoRpcResponse>(resp_msg);
@@ -287,12 +292,13 @@ namespace lcz_rpc
                     retry_req->setTraceId(req_msg->trace_id()); // 复用原始 trace_id
                     retry_req->setSpanId(req_msg->span_id());   // 复用同一 span，重试不另起跨度
                     BaseMessage::ptr retry_resp;
-                    if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(retry_req), retry_resp, timeout))
+                    RpcError retry_send_err = RpcError::TIMEOUT;
+                    if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(retry_req), retry_resp, timeout, &retry_send_err))
                     {
-                        LCZ_ERROR("call_proto BACKOFF 重试 send 失败");
-                        if (error_code) *error_code = "send_failed";
-                        if (err) *err = RpcError::TIMEOUT;
-                        if (_breaker) _breaker->onFailure(method_name, host);
+                        LCZ_ERROR("call_proto BACKOFF 重试 send 失败: err=%d", static_cast<int>(retry_send_err));
+                        if (error_code) *error_code = (retry_send_err == RpcError::BACKOFF) ? "queue_full" : "send_failed";
+                        if (err) *err = retry_send_err;
+                        if (_breaker && isHostSendFailure(retry_send_err)) _breaker->onFailure(method_name, host);
                         return false;
                     }
                     proto_resp = std::dynamic_pointer_cast<ProtoRpcResponse>(retry_resp);
@@ -392,10 +398,11 @@ namespace lcz_rpc
                     if (_breaker) _breaker->onSuccess(method_name, host);
                     prom->set_value(std::move(r));
                 };
-                if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), cb))
+                RpcError send_err = RpcError::TIMEOUT;
+                if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), cb, &send_err))
                 {
-                    LCZ_ERROR("call_proto async send failed");
-                    if (_breaker) _breaker->onFailure(method_name, host);
+                    LCZ_ERROR("call_proto async send failed: err=%d", static_cast<int>(send_err));
+                    if (_breaker && isHostSendFailure(send_err)) _breaker->onFailure(method_name, host);
                     return false;
                 }
                 return true;
@@ -456,16 +463,23 @@ namespace lcz_rpc
                     if (_breaker) _breaker->onSuccess(method_name, host);
                     if (on_success) on_success(r);
                 };
-                if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), cb))
+                RpcError send_err = RpcError::TIMEOUT;
+                if (!_requestor->send(conn, std::dynamic_pointer_cast<BaseMessage>(req_msg), cb, &send_err))
                 {
-                    LCZ_ERROR("call_proto callback send failed");
-                    if (_breaker) _breaker->onFailure(method_name, host);
+                    LCZ_ERROR("call_proto callback send failed: err=%d", static_cast<int>(send_err));
+                    if (_breaker && isHostSendFailure(send_err)) _breaker->onFailure(method_name, host);
                     return false;
                 }
                 return true;
             }
 
         private:
+            // 发送阶段失败是否说明「远端/链路」不健康（才计入熔断）。
+            // BACKOFF=本地发送队列满、SERVICE_ERROR=本地载荷/序列化问题，都不代表远端故障。
+            static bool isHostSendFailure(RpcError e)
+            {
+                return e == RpcError::TIMEOUT || e == RpcError::CONN_CLOSED;
+            }
             // 服务端响应码 → 客户端错误分类：仅 TIMEOUT/BACKOFF 可重试，其余业务错误不可重试
             static RpcError fromRespCode(RespCode code)
             {

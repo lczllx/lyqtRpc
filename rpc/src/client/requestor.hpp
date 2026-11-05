@@ -140,13 +140,16 @@ namespace lcz_rpc
                 delDesc(req_id);
             }
             // 异步发送：创建请求描述、设置超时定时器，通过 async_resp 返回 future 供调用方等待
+            // err 输出发送阶段失败原因（send 失败时取 conn->lastSendError()，超时由 sync 版本写入）
             bool send(const BaseConnection::ptr& conn,const BaseMessage::ptr& req,AsyncResponse& async_resp,
-                     std::chrono::milliseconds timeout = std::chrono::seconds(5))
+                     std::chrono::milliseconds timeout = std::chrono::seconds(5),
+                     RpcError *err = nullptr)
             {
                 ReqDescribe::ptr req_desc=newDesc(req,ReqType::ASYNC);
                 if(req_desc.get()==nullptr)
                 {
                     LCZ_ERROR("构造请求描述对象失败！");
+                    if (err) *err = RpcError::SERVICE_ERROR;
                     return false;
                 }
 
@@ -178,23 +181,26 @@ namespace lcz_rpc
                     if(has_timer)
                         muduo_conn->getLoop()->cancel(tid);
                     delDesc(req->rid());
+                    if (err) *err = conn->lastSendError();
                     return false;
                 }
                 async_resp= req_desc->response.get_future();//获取关联的future对象
+                if (err) *err = RpcError::OK;
                 return true;
             }
             // 同步发送：内部调用异步 send，阻塞等待响应直到超时或收到结果
             bool send(const BaseConnection::ptr& conn,const BaseMessage::ptr& req,BaseMessage::ptr& resp,
-                     std::chrono::milliseconds timeout = std::chrono::seconds(5))
+                     std::chrono::milliseconds timeout = std::chrono::seconds(5),
+                     RpcError *err = nullptr)
             {
                 LCZ_DEBUG("Requestor sync send id=%s, timeout=%ldms", req->rid().c_str(), timeout.count());
                 AsyncResponse async_resp;
-                if(send(conn,req,async_resp, timeout)==false)
+                if(send(conn,req,async_resp, timeout, err)==false)
                 {
                     LCZ_ERROR("Requestor sync send failed id=%s", req->rid().c_str());
                     return false;
                 }
-                
+
                 // 使用 wait_for 实现超时
                 if(async_resp.wait_for(timeout) == std::future_status::timeout)
                 {
@@ -208,28 +214,34 @@ namespace lcz_rpc
                             mc->getLoop()->cancel(desc->timer_id);
                     }
                     onTimeout(req->rid());  // 触发超时处理
+                    if (err) *err = RpcError::TIMEOUT;
                     return false;
                 }
-                
+
                 resp=async_resp.get();
                 LCZ_DEBUG("Requestor sync recv id=%s", req->rid().c_str());
+                if (err) *err = RpcError::OK;
                 return true;
             }
             // 回调方式发送：注册回调函数，响应到达时通过 onResponse 触发 cb
-            bool send(const BaseConnection::ptr& conn,const BaseMessage::ptr& req,const ReqCallback& cb)
+            bool send(const BaseConnection::ptr& conn,const BaseMessage::ptr& req,const ReqCallback& cb,
+                      RpcError *err = nullptr)
             {
                 ReqDescribe::ptr req_desc=newDesc(req,ReqType::CALLBACK,cb);
                 if(req_desc.get()==nullptr)
                 {
                     LCZ_ERROR("构造请求描述对象失败！");
+                    if (err) *err = RpcError::SERVICE_ERROR;
                     return false;
                 }
                 if (!conn->send(req))
                 {
                     LCZ_ERROR("回调请求发送失败: id=%s", req->rid().c_str());
                     delDesc(req->rid());
+                    if (err) *err = conn->lastSendError();
                     return false;
                 }
+                if (err) *err = RpcError::OK;
                 return true;
             }
             private:

@@ -42,10 +42,16 @@ namespace lcz_rpc
         bool connected() override { return _alive.load(std::memory_order_acquire); }
         std::string peerAddress() const override { return "shm://" + _name; }
 
+        // 发送失败原因由 ShmClient 在 send 失败时写入：
+        // ring 满 → BACKOFF（本地过载），通道不可用 → CONN_CLOSED
+        void setLastSendError(RpcError e) { _last_send_error.store(e, std::memory_order_relaxed); }
+        RpcError lastSendError() const override { return _last_send_error.load(std::memory_order_relaxed); }
+
     private:
         Sender _sender;    // Server 端 = write_response, Client 端 = send
         std::string _name; // 日志标识，如 "shm_server" / "shm_client"
         std::atomic<bool> _alive{true}; // 对端存活状态，由传输层后台线程/发送失败置 false
+        std::atomic<RpcError> _last_send_error{RpcError::CONN_CLOSED};
     };
 
 } // namespace lcz_rpc

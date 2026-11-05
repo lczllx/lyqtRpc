@@ -68,6 +68,10 @@ namespace lcz_rpc {
         using ptr = std::shared_ptr<BaseConnection>;
         // 发送消息；返回 false 表示消息没有进入传输层，调用方不应等待响应
         virtual bool send(const BaseMessage::ptr &msg) = 0;
+        // send 返回 false 后有效：失败原因。
+        // 区分「连接/网络故障」与「本地发送队列满」——后者是过载不是对端故障，
+        // 不应计入熔断器。默认按连接故障处理（TCP 发送失败即连接异常）。
+        virtual RpcError lastSendError() const { return RpcError::CONN_CLOSED; }
         // 关闭连接
         virtual void shutdown() = 0;
         // 检查连接状态

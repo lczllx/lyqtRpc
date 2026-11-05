@@ -30,8 +30,8 @@ namespace lcz_rpc
     public:
         ShmServerZc(const std::string &notify_path = "lcz_shm_zc_notify",
                     const std::string &shm_prefix = "lcz_shm_zc",
-                    size_t req_size = 64 * 1024 * 1024,
-                    size_t resp_size = 64 * 1024 * 1024,
+                    size_t req_size = SHM_DEFAULT_BUF_SIZE,
+                    size_t resp_size = SHM_DEFAULT_BUF_SIZE,
                     int max_clients = 64,
                     int worker_threads = 4)
             : _notify_path(notify_path), _shm_prefix(shm_prefix),

@@ -1,6 +1,7 @@
 #include "./shm_channel.hpp"
 #include <signal.h>
 #include <chrono>
+#include <thread>
 
 namespace lcz_rpc
 {
@@ -249,24 +250,37 @@ namespace lcz_rpc
     // data_base — 该通道数据区的起始地址
     // body      — 已序列化好的消息体
     // type      — 消息类型，告诉对端反序列化成什么
-    // max_retries — ring buffer 满时最多重试几次（consumer 消费后空间释放）
+    // wait_ms   — ring 满时的有界等待预算（背压）；0 表示立即失败
     bool ShmChannel::write_to(ShmRingBuf &ch, char *data_base,
-                              std::string_view body, MsgType type, int max_retries)
+                              std::string_view body, MsgType type, int wait_ms)
     {
         // 帧格式：| 4B frame_len | 4B msg_type | body |
         // frame_len = 8 + body_len，不含自身 4B
-        uint32_t body_len = body.size();
+        if (body.size() > UINT32_MAX - 8)
+        {
+            LCZ_ERROR("write_to: body too large (%zu bytes)", body.size());
+            return false;
+        }
+        uint32_t body_len = static_cast<uint32_t>(body.size());
         uint32_t frame_len = 8 + body_len;
         uint64_t ds = ch.data_size; // ring buffer 数据区总大小
 
-        LCZ_DEBUG("write_to: frame_len=%u body_len=%u max_retries=%d data_size=%lu",
-                  frame_len, body_len, max_retries, ds);
-
-        for (int retry = 0; retry < max_retries; ++retry)
+        // 单帧永远装不下：立即失败。等满预算再失败只会把配置错误伪装成超时。
+        if (ds < frame_len)
         {
-            if (retry > 0)
-                LCZ_DEBUG("write_to retry %d/%d", retry, max_retries);
+            LCZ_ERROR("write_to: frame_len=%u exceeds ring capacity=%lu", frame_len, ds);
+            return false;
+        }
 
+        LCZ_DEBUG("write_to: frame_len=%u body_len=%u wait_ms=%d data_size=%lu",
+                  frame_len, body_len, wait_ms, ds);
+
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(wait_ms > 0 ? wait_ms : 0);
+        int spins = 0;
+
+        for (;;)
+        {
             // 1. 读生产者位置（自己写的，relaxed 够用）
             uint64_t w = ch.write_idx.load(std::memory_order_relaxed);
             //    读消费者位置（对端写的，acquire 才能看到对方的消费进度）
@@ -274,66 +288,90 @@ namespace lcz_rpc
 
             LCZ_DEBUG("write_to idx: w=%lu r=%lu used=%lu", w, r, w - r);
 
+            uint64_t offset = 0;
+            bool space_ok = true;
+
             // 2. 检查空间：总大小 - 已用 = data_size - (w - r)
             //    uint64 回绕自动正确：如 w=5 r=UINT64_MAX-10 → 5-(-11)=16 ✓
             if (ds - (w - r) < frame_len)
             {
-                LCZ_DEBUG("write_to ring buffer full (avail=%lu < need=%u), retrying...",
+                LCZ_DEBUG("write_to ring buffer full (avail=%lu < need=%u), waiting...",
                           ds - (w - r), frame_len);
-                continue; // 不够，等 consumer 消费后重试
+                space_ok = false;
             }
-
-            // 3. 计算写入位置
-            uint64_t offset = w % ds;      // 环形偏移
-            uint64_t contig = ds - offset; // 从 offset 到 buffer 末尾还剩多少连续字节
-
-            // 4. 尾部连续空间不够容下整帧 → 写跳过帧，从 buffer 头重新开始
-            if (contig < frame_len)
+            else
             {
-                LCZ_DEBUG("write_to wrap: offset=%lu contig=%lu < frame_len=%u, writing skip frame",
-                          offset, contig, frame_len);
-                // 写一个 frame_len=0 的标记，consumer 读到 0 知道这是填充
-                if (contig >= 4)
+                // 3. 计算写入位置
+                offset = w % ds;      // 环形偏移
+                uint64_t contig = ds - offset; // 从 offset 到 buffer 末尾还剩多少连续字节
+
+                // 4. 尾部连续空间不够容下整帧 → 写跳过帧，从 buffer 头重新开始
+                if (contig < frame_len)
                 {
-                    // 正常写跳过帧
-                    static const uint32_t kSkip = 0;
-                    memcpy(data_base + offset, &kSkip, 4);
-                }
-                else
-                {
-                    // 尾部 1-3 字节残留，手动清零。否则 Consumer 读 frame_len 时
-                    // 会跨 buffer 边界读到下一帧的数据，形成垃圾值
-                    static const char kZero[3] = {0, 0, 0};
-                    memcpy(data_base + offset, kZero, contig);
-                }
-                w += contig;
-                offset = 0;
-                // 跳过后重新检查
-                if (ds - (w - r) < frame_len)
-                {
-                    LCZ_DEBUG("write_to after wrap still full, retrying");
-                    continue; // 跳过帧浪费了尾部空间，总量不够了，等 consumer 消费
+                    LCZ_DEBUG("write_to wrap: offset=%lu contig=%lu < frame_len=%u, writing skip frame",
+                              offset, contig, frame_len);
+                    // 写一个 frame_len=0 的标记，consumer 读到 0 知道这是填充
+                    if (contig >= 4)
+                    {
+                        // 正常写跳过帧
+                        static const uint32_t kSkip = 0;
+                        memcpy(data_base + offset, &kSkip, 4);
+                    }
+                    else
+                    {
+                        // 尾部 1-3 字节残留，手动清零。否则 Consumer 读 frame_len 时
+                        // 会跨 buffer 边界读到下一帧的数据，形成垃圾值
+                        static const char kZero[3] = {0, 0, 0};
+                        memcpy(data_base + offset, kZero, contig);
+                    }
+                    w += contig;
+                    offset = 0;
+                    // 跳过后重新检查
+                    if (ds - (w - r) < frame_len)
+                    {
+                        LCZ_DEBUG("write_to after wrap still full, waiting");
+                        space_ok = false; // 跳过帧浪费了尾部空间，总量不够了
+                    }
                 }
             }
 
-            // 5. 写 frame_len（4B，不含自身）
-            LCZ_DEBUG("write_to writing at offset=%lu: frame_len=%u type=%d body_len=%u",
-                      offset, frame_len, static_cast<int>(type), body_len);
-            memcpy(data_base + offset, &frame_len, 4);
-            //    写 msg_type（4B，int32 格式）
-            int32_t mt = static_cast<int32_t>(type);
-            memcpy(data_base + offset + 4, &mt, 4);
-            //    写 body（变长）
-            memcpy(data_base + offset + 8, body.data(), body_len);
+            if (space_ok)
+            {
+                // 5. 写 frame_len（4B，不含自身）
+                LCZ_DEBUG("write_to writing at offset=%lu: frame_len=%u type=%d body_len=%u",
+                          offset, frame_len, static_cast<int>(type), body_len);
+                memcpy(data_base + offset, &frame_len, 4);
+                //    写 msg_type（4B，int32 格式）
+                int32_t mt = static_cast<int32_t>(type);
+                memcpy(data_base + offset + 4, &mt, 4);
+                //    写 body（变长）
+                memcpy(data_base + offset + 8, body.data(), body_len);
 
-            // 6. 公布新位置
-            //    release：保证上面三个 memcpy 全部完成，对端 acquire 才能看到
-            ch.write_idx.store(w + frame_len, std::memory_order_release);
-            LCZ_DEBUG("write_to done, new write_idx=%lu", w + frame_len);
-            return true;
+                // 6. 公布新位置
+                //    release：保证上面三个 memcpy 全部完成，对端 acquire 才能看到
+                ch.write_idx.store(w + frame_len, std::memory_order_release);
+                LCZ_DEBUG("write_to done, new write_idx=%lu", w + frame_len);
+                return true;
+            }
+
+            // 7. 空间不足：在预算内等待消费者腾出空间（有界背压）
+            if (wait_ms <= 0)
+            {
+                LCZ_DEBUG("write_to failed: ring full, wait_ms=0");
+                return false;
+            }
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                LCZ_WARN("write_to failed: ring full after %dms wait (frame_len=%u)",
+                         wait_ms, frame_len);
+                return false;
+            }
+            // 短暂拥塞先让出 CPU；持续拥塞再睡眠，避免生产者空转烧核
+            if (spins++ < 32)
+                std::this_thread::yield();
+            else
+                std::this_thread::sleep_for(std::chrono::microseconds(200));
         }
-        LCZ_DEBUG("write_to failed after %d retries", max_retries);
-        return false; // 重试耗完，ring buffer 一直满
     }
 
     // ====== 内部：从指定通道读一帧 ======
@@ -395,11 +433,11 @@ namespace lcz_rpc
 
     // ====== 请求方向（Client → Server） ======
     // 委托到 write_to / read_from，走 req_channel
-    bool ShmChannel::write_request(std::string_view body, MsgType type, int max_retries)
+    bool ShmChannel::write_request(std::string_view body, MsgType type, int wait_ms)
     {
-        LCZ_DEBUG("write_request: body_len=%zu type=%d max_retries=%d",
-                  body.size(), static_cast<int>(type), max_retries);
-        bool ok = write_to(_ctrl->req_channel, _req_data, body, type, max_retries);
+        LCZ_DEBUG("write_request: body_len=%zu type=%d wait_ms=%d",
+                  body.size(), static_cast<int>(type), wait_ms);
+        bool ok = write_to(_ctrl->req_channel, _req_data, body, type, wait_ms);
         LCZ_DEBUG("write_request result=%d", ok);
         return ok;
     }
@@ -413,11 +451,11 @@ namespace lcz_rpc
 
     // ====== 响应方向（Server → Client） ======
     // 委托到 write_to / read_from，走 resp_channel
-    bool ShmChannel::write_response(std::string_view body, MsgType type, int max_retries)
+    bool ShmChannel::write_response(std::string_view body, MsgType type, int wait_ms)
     {
-        LCZ_DEBUG("write_response: body_len=%zu type=%d max_retries=%d",
-                  body.size(), static_cast<int>(type), max_retries);
-        bool ok = write_to(_ctrl->resp_channel, _resp_data, body, type, max_retries);
+        LCZ_DEBUG("write_response: body_len=%zu type=%d wait_ms=%d",
+                  body.size(), static_cast<int>(type), wait_ms);
+        bool ok = write_to(_ctrl->resp_channel, _resp_data, body, type, wait_ms);
         LCZ_DEBUG("write_response result=%d", ok);
         return ok;
     }

@@ -15,6 +15,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <cstdlib>
 #include <thread>
 #include <stop_token>
 #include <span>
@@ -26,7 +27,11 @@ namespace lcz_rpc
     {
     public:
         ShmClientProto(const std::string &notify_path = "lcz_shm_proto_notify")
-            : _notify_path(notify_path) {}
+            : _notify_path(notify_path)
+        {
+            if (const char *env = std::getenv("LCZ_SHM_WRITE_WAIT_MS"))
+                _write_wait_ms = std::atoi(env);
+        }
 
         void connect() override
         {
@@ -78,7 +83,29 @@ namespace lcz_rpc
         {
             auto req = std::dynamic_pointer_cast<ProtoRpcRequest>(msg);
             if (!req)
+            {
+                if (_conn)
+                    _conn->setLastSendError(RpcError::SERVICE_ERROR);
                 return false;
+            }
+            if (!_channel.is_open())
+            {
+                if (_conn)
+                {
+                    _conn->setLastSendError(RpcError::CONN_CLOSED);
+                    _conn->markDead();
+                }
+                return false;
+            }
+            // 单帧超过 ring 容量：重试不会变好，直接按配置/载荷错误上报
+            if (req->byteSize() + 8 > _channel.req_capacity())
+            {
+                LCZ_ERROR("[ShmClientProto] message too large: %zu bytes > ring capacity %zu",
+                          req->byteSize() + 8, _channel.req_capacity());
+                if (_conn)
+                    _conn->setLastSendError(RpcError::SERVICE_ERROR);
+                return false;
+            }
 
             std::span<char> buf = _channel.req_write_ptr();
             if (!buf.empty() && buf.size() >= req->byteSize())
@@ -90,10 +117,21 @@ namespace lcz_rpc
             {
                 // fallback: string copy
                 std::string body = req->serialize();
-                if (!_channel.write_request(body, MsgType::REQ_RPC_PROTO))
+                if (!_channel.write_request(body, MsgType::REQ_RPC_PROTO, _write_wait_ms))
                 {
-                    if (!_channel.is_open() && _conn)
-                        _conn->markDead();
+                    if (_conn)
+                    {
+                        if (!_channel.is_open())
+                        {
+                            _conn->setLastSendError(RpcError::CONN_CLOSED);
+                            _conn->markDead();
+                        }
+                        else
+                        {
+                            // ring 满/等待超时：本地过载，可退避，不计熔断
+                            _conn->setLastSendError(RpcError::BACKOFF);
+                        }
+                    }
                     return false;
                 }
                 _channel.notify_req();
@@ -167,6 +205,7 @@ namespace lcz_rpc
         ShmConnection::ptr _conn;
         std::string _notify_path, _shm_name;
         std::jthread _worker;
+        int _write_wait_ms = SHM_REQUEST_WAIT_MS; // ring 满时的有界等待预算（LCZ_SHM_WRITE_WAIT_MS 可覆盖）
     };
 
 } // namespace lcz_rpc

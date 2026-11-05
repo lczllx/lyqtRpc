@@ -33,6 +33,16 @@ namespace lcz_rpc
     static constexpr uint32_t SHM_VERSION = 1;
     static constexpr int SHM_READY_TIMEOUT_MS = 3000; // Client 等待 Server 初始化的上限
 
+    // 每客户端每方向默认容量。旧默认是 64MB+64MB，按 max_clients=64 算要占 8GB
+    // 地址空间（tmpfs 页在写入后才分配，但一旦被写到就不会退还）。
+    // 8MB 足够普通 JSON/日志类消息；大载荷作为零拷贝场景由构造参数显式调大。
+    static constexpr size_t SHM_DEFAULT_BUF_SIZE = 8 * 1024 * 1024;
+
+    // ring 满时的有界等待预算（背压）：请求方向让生产者阻塞到有空位或超时；
+    // 响应方向保持 0，避免单个慢客户端把 worker 线程拖住。
+    static constexpr int SHM_REQUEST_WAIT_MS = 100;
+    static constexpr int SHM_RESPONSE_WAIT_MS = 0;
+
     struct ShmRingBuf
     {
         std::atomic<uint64_t> write_idx{0}; // 生产者独占写（谁写谁 load relaxed）
@@ -80,12 +90,17 @@ namespace lcz_rpc
         //   shm_open → fstat → mmap → 等 ready（超时返回 false）→ 校验 magic/version
 
         // ====== 请求方向（Client → Server） ======
-        bool write_request(std::string_view body, MsgType type, int max_retries = 3);
+        // wait_ms > 0 时 ring 满会阻塞等待空位（有界背压），超时才返回 false
+        bool write_request(std::string_view body, MsgType type, int wait_ms = SHM_REQUEST_WAIT_MS);
         bool read_request(std::string &body, MsgType &type);
 
         // ====== 响应方向（Server → Client） ======
-        bool write_response(std::string_view body, MsgType type, int max_retries = 3);
+        bool write_response(std::string_view body, MsgType type, int wait_ms = SHM_RESPONSE_WAIT_MS);
         bool read_response(std::string &body, MsgType &type);
+
+        // 每方向 ring 的容量（字节）；发送前可据此判断单帧是否必然放不下
+        size_t req_capacity() const { return _ctrl ? _ctrl->req_channel.data_size : 0; }
+        size_t resp_capacity() const { return _ctrl ? _ctrl->resp_channel.data_size : 0; }
 
         // ====== 初始化握手（单客户端模式，保留向后兼容） ======
         bool setup_notify_server(const std::string &notify_path);
@@ -139,7 +154,7 @@ namespace lcz_rpc
     private:
         // 内部读写，被四个公开方法委托
         bool write_to(ShmRingBuf &ch, char *data_base,
-                      std::string_view body, MsgType type, int max_retries);
+                      std::string_view body, MsgType type, int wait_ms);
         bool read_from(ShmRingBuf &ch, char *data_base,
                        std::string &body, MsgType &type);
 

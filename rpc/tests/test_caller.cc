@@ -17,6 +17,7 @@ using lcz_rpc::RpcResponse;
 using lcz_rpc::RpcError;
 using lcz_rpc::RespCode;
 using lcz_rpc::CircuitConfig;
+using lcz_rpc::CircuitState;
 
 namespace
 {
@@ -31,6 +32,7 @@ namespace
         Json::Value result;
         int send_count = 0;
         bool send_ok = true;
+        RpcError last_send_error = RpcError::CONN_CLOSED;
 
         bool send(const BaseMessage::ptr &msg) override
         {
@@ -50,6 +52,7 @@ namespace
         void shutdown() override {}
         bool connected() override { return true; }
         std::string peerAddress() const override { return "10.0.0.1:8080"; }
+        RpcError lastSendError() const override { return last_send_error; }
     };
 
     Json::Value makeParams()
@@ -160,4 +163,46 @@ TEST(CallerTest, RemoteBusinessErrorMapsToServiceError)
     RpcError err = RpcError::OK;
     EXPECT_FALSE(caller.call(conn, "add", makeParams(), result, &err));
     EXPECT_EQ(err, RpcError::SERVICE_ERROR);
+}
+
+// 本地发送队列满 → BACKOFF（可退避重试），但不能计入熔断：
+// 本地过载不是远端故障，否则一次排队就会把健康 host 熔断
+TEST(CallerTest, SendQueueFullMapsToBackoffWithoutTrippingBreaker)
+{
+    CircuitConfig cfg;
+    cfg.min_calls = 1; // 若误记一次失败就会立刻 OPEN
+    cfg.open_duration_sec = 1000;
+    auto breaker = std::make_shared<CircuitBreaker>(cfg, std::make_shared<MemoryCircuitStore>());
+    auto requestor = std::make_shared<Requestor>();
+    RpcCaller caller(requestor, breaker);
+    auto conn = std::make_shared<FakeConnection>();
+    conn->send_ok = false;
+    conn->last_send_error = RpcError::BACKOFF;
+
+    Json::Value result;
+    RpcError err = RpcError::OK;
+    EXPECT_FALSE(caller.call(conn, "add", makeParams(), result, &err));
+    EXPECT_EQ(err, RpcError::BACKOFF);
+    EXPECT_EQ(breaker->status("add", "10.0.0.1:8080").state, CircuitState::CLOSED);
+    EXPECT_EQ(breaker->status("add", "10.0.0.1:8080").failures, 0);
+}
+
+// 连接断开导致的发送失败仍然计入熔断（真故障信号不能因为改动而丢失）
+TEST(CallerTest, SendConnClosedTripsBreaker)
+{
+    CircuitConfig cfg;
+    cfg.min_calls = 1;
+    cfg.open_duration_sec = 1000;
+    auto breaker = std::make_shared<CircuitBreaker>(cfg, std::make_shared<MemoryCircuitStore>());
+    auto requestor = std::make_shared<Requestor>();
+    RpcCaller caller(requestor, breaker);
+    auto conn = std::make_shared<FakeConnection>();
+    conn->send_ok = false;
+    conn->last_send_error = RpcError::CONN_CLOSED;
+
+    Json::Value result;
+    RpcError err = RpcError::OK;
+    EXPECT_FALSE(caller.call(conn, "add", makeParams(), result, &err));
+    EXPECT_EQ(err, RpcError::CONN_CLOSED);
+    EXPECT_EQ(breaker->status("add", "10.0.0.1:8080").state, CircuitState::OPEN);
 }
