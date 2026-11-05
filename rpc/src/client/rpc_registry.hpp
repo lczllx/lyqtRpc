@@ -35,36 +35,37 @@ namespace lcz_rpc
                 _host.emplace_back(HostDetail{host,load});
                 rebuildRing();
             }
-            // 按指定策略从主机列表中选一个
+            // 按指定策略从主机列表中选一个（单次选择不构造候选列表，保持热路径无分配）
             HostDetail selectHost(LoadBalanceStrategy strategy, const std::string &key = {})
             {
                 std::unique_lock<std::mutex> lock(_mutex);
                 if (_host.empty()) return HostDetail();//如果主机列表为空，则返回空
                 switch (strategy)
                 {
-                    case LoadBalanceStrategy::ROUND_ROBIN:
+                case LoadBalanceStrategy::ROUND_ROBIN:
                     return pickRoundRobin();
-                    case LoadBalanceStrategy::RANDOM:
-                        return pickRandom();
-                    case LoadBalanceStrategy::SOURCE_HASH:
-                        return pickSourceHash(key);
-                    case LoadBalanceStrategy::LOWEST_LOAD:
-                        return pickLowestLoad();
-                    case LoadBalanceStrategy::CONSISTENT_HASH:
-                        return pickConsistentHash(key);
+                case LoadBalanceStrategy::RANDOM:
+                    return pickRandom();
+                case LoadBalanceStrategy::SOURCE_HASH:
+                    return pickSourceHash(key);
+                case LoadBalanceStrategy::LOWEST_LOAD:
+                    return pickLowestLoad();
+                case LoadBalanceStrategy::CONSISTENT_HASH:
+                    return pickConsistentHash(key);
                 }
                 return HostDetail();//如果策略不合法，则返回空
             }
+            // 以下 pick* 均为热路径单次选择，调用方必须已持有 _mutex
             // 轮询选择
-            HostDetail pickRoundRobin() 
+            HostDetail pickRoundRobin()
             {
-                if(_host.empty()) return HostDetail();
+                if (_host.empty()) return HostDetail();
                 auto pos = _idx++ % _host.size();
-                if (_idx >= MAX_IDX) _idx%=_host.size();//防止索引溢出
+                if (_idx >= MAX_IDX) _idx %= _host.size();//防止索引溢出
                 return _host[pos];
             }
             // 随机选择
-            HostDetail pickRandom() 
+            HostDetail pickRandom()
             {
                 if (_host.empty()) return HostDetail();
                 std::uniform_int_distribution<size_t> dist(0, _host.size() - 1);
@@ -72,51 +73,151 @@ namespace lcz_rpc
                 return _host[pos];
             }
             // 按 key 哈希固定选同一主机
-            HostDetail pickSourceHash(const std::string &key) {
-                if(key.empty())return pickRandom();//如果key为空，则随机选择主机
-                if(_host.empty())return HostDetail();
-                size_t hash_val=_hash(key);
-                size_t pos=hash_val%_host.size();
+            HostDetail pickSourceHash(const std::string &key)
+            {
+                if (key.empty()) return pickRandom();//如果key为空，则随机选择主机
+                if (_host.empty()) return HostDetail();
+                size_t hash_val = _hash(key);
+                size_t pos = hash_val % _host.size();
                 return _host[pos];
             }
             // 选负载最低的主机（同负载则轮询打散，避免所有请求砸向同一台）
-            HostDetail pickLowestLoad() {
-                if(_host.empty())return HostDetail();
+            HostDetail pickLowestLoad()
+            {
+                if (_host.empty()) return HostDetail();
                 //负载最优+轮询分配
                 int best_load = std::numeric_limits<int>::max();//初始化最佳负载为int最大值
                 std::vector<size_t> candidates;//所有负载最优的主机索引
 
                 //负载最优筛选 遍历主机列表，记录负载最小的主机索引
-                for(size_t i=0;i<_host.size();++i)
+                for (size_t i = 0; i < _host.size(); ++i)
                 {
-                    const auto& detail=_host[i];
-                    if(detail.load<best_load)//发现更低的负载
+                    const auto &detail = _host[i];
+                    if (detail.load < best_load)//发现更低的负载
                     {
-                        best_load=detail.load;
+                        best_load = detail.load;
                         candidates.clear();//清空候选集
                         candidates.push_back(i);//添加当前主机索引
                     }
-                    else if(detail.load==best_load)
+                    else if (detail.load == best_load)
                     {
                         candidates.push_back(i);
                     }
                 }
-                if(candidates.empty())return HostDetail();
+                if (candidates.empty()) return HostDetail();
                 //轮询分配 配合_idx防止溢出，确保轮询顺序
-                size_t cur_pos=_idx++;
-                if(_idx>=MAX_IDX)_idx%=_host.size();
-                auto pos=candidates[cur_pos%candidates.size()];
+                size_t cur_pos = _idx++;
+                if (_idx >= MAX_IDX) _idx %= _host.size();
+                auto pos = candidates[cur_pos % candidates.size()];
                 return _host[pos];
             }
             // 一致性哈希选择：key 哈希后顺时针在哈希环上找第一个虚拟节点
             HostDetail pickConsistentHash(const std::string &key)
             {
                 if (key.empty()) return pickRandom(); // 无 key 退化成随机（与 SOURCE_HASH 一致）
-                if (_ring.empty()) return HostDetail();
+                if (_ring.empty()) return pickRandom(); // 环未建（带 host 构造）时退化随机，与 selectHosts 一致
                 size_t hash_val = _hash(key);
                 auto it = _ring.lower_bound(hash_val); // 顺时针找第一个 >= hash 的虚拟节点
                 if (it == _ring.end()) it = _ring.begin(); // 越过环尾回绕到起点
                 return _host[it->second];
+            }
+            // 按策略返回有序候选列表（主机去重，首元素与 selectHost 一致）。
+            // 调用方重试时按顺序取下一个未试过的 host：一致性哈希/最低负载这类
+            // 确定性策略原本每次都会选回同一台，重试等于重发到坏节点。
+            std::vector<HostDetail> selectHosts(LoadBalanceStrategy strategy, const std::string &key = {})
+            {
+                std::unique_lock<std::mutex> lock(_mutex);
+                std::vector<HostDetail> out;
+                if (_host.empty()) return out;
+                const size_t n = _host.size();
+                out.reserve(n);
+                switch (strategy)
+                {
+                case LoadBalanceStrategy::ROUND_ROBIN:
+                {
+                    // 先取模再自增，避免 uint64 溢出后取模语义变化
+                    size_t start = _idx++ % n;
+                    if (_idx >= MAX_IDX) _idx %= n; //防止索引溢出
+                    for (size_t i = 0; i < n; ++i)
+                        out.push_back(_host[(start + i) % n]);
+                    return out;
+                }
+                case LoadBalanceStrategy::RANDOM:
+                {
+                    std::vector<size_t> order(n);
+                    for (size_t i = 0; i < n; ++i) order[i] = i;
+                    std::shuffle(order.begin(), order.end(), _rng);
+                    for (size_t idx : order) out.push_back(_host[idx]);
+                    return out;
+                }
+                case LoadBalanceStrategy::SOURCE_HASH:
+                {
+                    if (key.empty()) //如果key为空，则随机选择主机
+                    {
+                        randomOrder(out);
+                        return out;
+                    }
+                    size_t start = _hash(key) % n;
+                    for (size_t i = 0; i < n; ++i)
+                        out.push_back(_host[(start + i) % n]);
+                    return out;
+                }
+                case LoadBalanceStrategy::LOWEST_LOAD:
+                {
+                    // 按负载升序排列，同负载组内保持原顺序；
+                    // 组内轮询起点与旧 selectHost 一致（_idx++ % 组大小）
+                    std::vector<size_t> order(n);
+                    for (size_t i = 0; i < n; ++i) order[i] = i;
+                    std::stable_sort(order.begin(), order.end(), [this](size_t a, size_t b) {
+                        return _host[a].load < _host[b].load;
+                    });
+                    size_t best_cnt = 1;
+                    while (best_cnt < n && _host[order[best_cnt]].load == _host[order[0]].load)
+                        ++best_cnt;
+                    size_t start = _idx++;
+                    if (_idx >= MAX_IDX) _idx %= n;
+                    for (size_t i = 0; i < best_cnt; ++i)
+                        out.push_back(_host[order[(start + i) % best_cnt]]);
+                    for (size_t i = best_cnt; i < n; ++i)
+                        out.push_back(_host[order[i]]);
+                    return out;
+                }
+                case LoadBalanceStrategy::CONSISTENT_HASH:
+                {
+                    if (key.empty() || _ring.empty()) // 无 key/环未建退化随机
+                    {
+                        randomOrder(out);
+                        return out;
+                    }
+                    size_t hash_val = _hash(key);
+                    auto it = _ring.lower_bound(hash_val); // 顺时针找第一个 >= hash 的虚拟节点
+                    if (it == _ring.end()) it = _ring.begin(); // 越过环尾回绕到起点
+                    std::vector<bool> seen(n, false);
+                    size_t remaining = n;
+                    for (size_t step = 0; step < _ring.size() && remaining > 0; ++step)
+                    {
+                        size_t idx = it->second;
+                        if (!seen[idx])
+                        {
+                            seen[idx] = true;
+                            --remaining;
+                            out.push_back(_host[idx]);
+                        }
+                        ++it;
+                        if (it == _ring.end()) it = _ring.begin();
+                    }
+                    return out;
+                }
+                }
+                return out; // 策略不合法
+            }
+            // 生成随机顺序的候选列表（调用方必须已持有 _mutex）
+            void randomOrder(std::vector<HostDetail> &out)
+            {
+                std::vector<size_t> order(_host.size());
+                for (size_t i = 0; i < _host.size(); ++i) order[i] = i;
+                std::shuffle(order.begin(), order.end(), _rng);
+                for (size_t idx : order) out.push_back(_host[idx]);
             }
             // 重建哈希环（调用方必须已持有 _mutex）
             void rebuildRing()
@@ -327,19 +428,35 @@ namespace lcz_rpc
                                  bool force_remote = false,
                                  const std::string &key = {})
             {
+                std::vector<HostDetail> details;
+                if (!serviceDiscover(conn, method, details, strategy, force_remote, key) || details.empty())
+                    return false;
+                detail = details.front();
+                return true;
+            }
+            // 发现服务（候选列表版本）：返回按策略排序的全部主机，重试时逐个尝试
+            bool serviceDiscover(const BaseConnection::ptr &conn,
+                                 const std::string &method,
+                                 std::vector<HostDetail> &details,
+                                 LoadBalanceStrategy strategy,
+                                 bool force_remote = false,
+                                 const std::string &key = {})
+            {
                 if (!force_remote)
                 {
                     std::unique_lock<std::mutex> lock(_mutex);
                     auto it = _method_host.find(method);
                     if (it != _method_host.end())
                     {
-                        detail = it->second->selectHost(strategy, key);
-                        LCZ_INFO("[discover-cache] method=%s strategy=%d host=%s:%d load=%d",
+                        details = it->second->selectHosts(strategy, key);
+                        if (details.empty()) return false;
+                        LCZ_INFO("[discover-cache] method=%s strategy=%d host=%s:%d load=%d candidates=%zu",
                             method.c_str(),
                             static_cast<int>(strategy),
-                            detail.host.first.c_str(),
-                            detail.host.second,
-                            detail.load);
+                            details.front().host.first.c_str(),
+                            details.front().host.second,
+                            details.front().load,
+                            details.size());
                         return true;
                     }
                 }
@@ -368,11 +485,11 @@ namespace lcz_rpc
                     LCZ_ERROR("服务发现失败:%s", errReason(service_resp->rcode()).c_str());
                     return false;
                 }
-                auto details = service_resp->hostsDetail(); // 注意这里
-                 if (details.empty()) { LCZ_ERROR("服务发现失败，没有提供 %s 服务的主机", method.c_str()); return false; }
-                 
+                auto host_details = service_resp->hostsDetail(); // 注意这里
+                 if (host_details.empty()) { LCZ_ERROR("服务发现失败，没有提供 %s 服务的主机", method.c_str()); return false; }
+
                  auto method_host = std::make_shared<MethodHost>();
-                 for (const auto &detail : details) {
+                 for (const auto &detail : host_details) {
                      method_host->appendHost(detail.host, detail.load);
                  }
 
@@ -390,12 +507,14 @@ namespace lcz_rpc
                          _method_host[method] = cached;
                      }
                  }
-                 detail=cached->selectHost(strategy, key);
-                 LCZ_INFO("[discover-cache] method=%s host=%s:%d load=%d",
+                 details = cached->selectHosts(strategy, key);
+                 if (details.empty()) return false;
+                 LCZ_INFO("[discover-cache] method=%s host=%s:%d load=%d candidates=%zu",
                     method.c_str(),
-                    detail.host.first.c_str(),
-                    detail.host.second,
-                    detail.load);
+                    details.front().host.first.c_str(),
+                    details.front().host.second,
+                    details.front().load,
+                    details.size());
                  return true;
             }
         private:

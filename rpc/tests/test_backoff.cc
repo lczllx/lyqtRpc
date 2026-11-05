@@ -5,6 +5,10 @@
 #include "src/client/rpc_client.hpp"
 
 using lcz_rpc::client::backoffDelayMs;
+using lcz_rpc::client::pickUntriedCandidate;
+using lcz_rpc::client::HostInfoHash;
+using lcz_rpc::HostDetail;
+using lcz_rpc::HostInfo;
 using lcz_rpc::RetryConfig;
 
 // 每次退避都落在 [0, min(max_ms, base_ms * 2^attempt)] 区间内
@@ -48,4 +52,64 @@ TEST(BackoffTest, FullJitterProducesVariety)
     for (int i = 0; i < 1000; ++i)
         seen.insert(backoffDelayMs(cfg, 3).count()); // 区间 [0,80]
     EXPECT_GT(seen.size(), 1u);
+}
+
+namespace
+{
+    std::vector<HostDetail> threeHosts()
+    {
+        return {HostDetail{HostInfo("10.0.0.1", 8080), 0},
+                HostDetail{HostInfo("10.0.0.2", 8080), 0},
+                HostDetail{HostInfo("10.0.0.3", 8080), 0}};
+    }
+}
+
+// 重试游标：依次跳过已试过的 host，不会反复打同一台
+TEST(RetryCandidateTest, WalksEveryCandidateOnce)
+{
+    auto candidates = threeHosts();
+    std::unordered_set<HostInfo, HostInfoHash> tried;
+    for (const auto &expected : candidates)
+    {
+        const HostDetail *next = pickUntriedCandidate(candidates, tried);
+        ASSERT_NE(next, nullptr);
+        EXPECT_EQ(next->host, expected.host);
+        tried.insert(next->host);
+    }
+}
+
+// 全部候选都试过：重置后从头开始，单实例集群的重试次数不被候选数截断
+TEST(RetryCandidateTest, ResetsAfterAllTried)
+{
+    auto candidates = threeHosts();
+    std::unordered_set<HostInfo, HostInfoHash> tried;
+    for (const auto &c : candidates)
+        tried.insert(c.host);
+
+    const HostDetail *next = pickUntriedCandidate(candidates, tried);
+    ASSERT_NE(next, nullptr);
+    EXPECT_EQ(next->host, candidates.front().host);
+    EXPECT_TRUE(tried.empty()); // 游标已重置，下一轮重新计
+}
+
+// 单候选：每次重试都拿到同一台（但调用方仍会按 max_retries 重试）
+TEST(RetryCandidateTest, SingleCandidateRepeats)
+{
+    std::vector<HostDetail> candidates{HostDetail{HostInfo("10.0.0.1", 8080), 0}};
+    std::unordered_set<HostInfo, HostInfoHash> tried;
+    for (int i = 0; i < 3; ++i)
+    {
+        const HostDetail *next = pickUntriedCandidate(candidates, tried);
+        ASSERT_NE(next, nullptr);
+        EXPECT_EQ(next->host, candidates.front().host);
+        tried.insert(next->host);
+    }
+}
+
+// 空候选：返回 nullptr，不崩溃
+TEST(RetryCandidateTest, EmptyCandidatesReturnNull)
+{
+    std::vector<HostDetail> candidates;
+    std::unordered_set<HostInfo, HostInfoHash> tried;
+    EXPECT_EQ(pickUntriedCandidate(candidates, tried), nullptr);
 }

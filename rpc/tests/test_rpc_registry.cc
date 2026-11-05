@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <set>
 #include "src/server/rpc_registry.hpp"
 #include "src/client/rpc_registry.hpp"
 #include "src/client/requestor.hpp"
@@ -316,4 +317,45 @@ TEST(DiscoverClientTest, OnlineDuringDiscoveryIsNotOverwritten)
     ASSERT_TRUE(discover->serviceDiscover(
         conn, "echo", again, lcz_rpc::LoadBalanceStrategy::ROUND_ROBIN));
     EXPECT_EQ(again.host, HostInfo("10.0.0.2", 2222));
+}
+
+// 候选列表接口：一次返回全部主机（去重），供调用方重试时逐个尝试
+TEST(DiscoverClientTest, ServiceDiscoverReturnsCandidateList)
+{
+    auto requestor = std::make_shared<lcz_rpc::client::Requestor>();
+    auto conn = std::make_shared<RespondingConnection>();
+
+    conn->on_send = [&](const BaseMessage::ptr &msg) {
+        auto req = std::dynamic_pointer_cast<ServiceRequest>(msg);
+        if (!req) return;
+        auto resp = MessageFactory::create<ServiceResponse>();
+        resp->setId(req->rid());
+        resp->setRcode(RespCode::SUCCESS);
+        resp->setOptype(ServiceOpType::DISCOVER);
+        resp->setHostDetails({lcz_rpc::HostDetail{HostInfo("10.0.0.1", 1111), 3},
+                              lcz_rpc::HostDetail{HostInfo("10.0.0.2", 2222), 1},
+                              lcz_rpc::HostDetail{HostInfo("10.0.0.3", 3333), 2}});
+        BaseMessage::ptr base = resp;
+        requestor->onResponse(conn, base);
+    };
+
+    auto discover = std::make_shared<lcz_rpc::client::Discover>(
+        requestor, [](const HostInfo &) {});
+
+    std::vector<lcz_rpc::HostDetail> list;
+    ASSERT_TRUE(discover->serviceDiscover(
+        conn, "echo", list, lcz_rpc::LoadBalanceStrategy::ROUND_ROBIN));
+    ASSERT_EQ(list.size(), 3u);
+    std::set<HostInfo> seen;
+    for (const auto &d : list) seen.insert(d.host);
+    EXPECT_EQ(seen.size(), 3u);
+
+    // 最低负载策略：候选列表首元素是负载最低的主机，重试会换到次低负载主机
+    std::vector<lcz_rpc::HostDetail> by_load;
+    ASSERT_TRUE(discover->serviceDiscover(
+        conn, "echo", by_load, lcz_rpc::LoadBalanceStrategy::LOWEST_LOAD));
+    ASSERT_EQ(by_load.size(), 3u);
+    EXPECT_EQ(by_load[0].host, HostInfo("10.0.0.2", 2222));
+    EXPECT_EQ(by_load[1].host, HostInfo("10.0.0.3", 3333));
+    EXPECT_EQ(by_load[2].host, HostInfo("10.0.0.1", 1111));
 }

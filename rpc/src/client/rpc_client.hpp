@@ -7,6 +7,8 @@
 #include "rpc_registry.hpp"
 #include "rpc_topic.hpp"
 #include <string>
+#include <vector>
+#include <unordered_set>
 #include <cstdlib>
 #include <chrono>
 #include <thread>
@@ -143,37 +145,31 @@ namespace lcz_rpc
 
             // 发现服务，返回主机详情（支持负载均衡），结果写入 detail_bylast
             bool serviceDiscover(const std::string &method, HostDetail &detail_bylast,LoadBalanceStrategy strategy, const std::string &key = {}) {
-                HostDetail detail;
-                auto conn = _client->connection();
-                if(conn.get() == nullptr || conn->connected() == false)
-                {
-                    LCZ_ERROR("连接获取失败,无法发现服务:%s", method.c_str());
+                std::vector<HostDetail> details;
+                if (!serviceDiscover(method, details, strategy, key) || details.empty())
                     return false;
-                }
-                if (_discover->serviceDiscover(conn, method, detail,strategy, false, key)) {
-                    detail_bylast = detail;
-                    {
-                        std::unique_lock<std::mutex> lock(_tracked_mutex);
-                        _tracked_methods.insert(method);
-                    }
-                    // 可以把 detail.load 缓存起来
-                    return true;
-                }
-                return false;  // 别忘记有返回
+                detail_bylast = details.front();
+                return true;
             }
             // 注入序列化器到内部客户端
             void setSerializer(std::shared_ptr<ISerializer> s) { if (_client) _client->setSerializer(s); }
             // 发现服务，返回主机信息（支持负载均衡）
             bool serviceDiscover(const std::string &method, HostInfo &host,LoadBalanceStrategy strategy, const std::string &key = {}) {
-                HostDetail detail;
+                std::vector<HostDetail> details;
+                if (!serviceDiscover(method, details, strategy, key) || details.empty())
+                    return false;
+                host = details.front().host;
+                return true;
+            }
+            // 发现服务（候选列表版本）：返回按策略排序的全部主机，重试时逐个尝试
+            bool serviceDiscover(const std::string &method, std::vector<HostDetail> &details,LoadBalanceStrategy strategy, const std::string &key = {}) {
                 auto conn = _client->connection();
                 if(conn.get() == nullptr || conn->connected() == false)
                 {
                     LCZ_ERROR("连接获取失败,无法发现服务:%s", method.c_str());
                     return false;
                 }
-                if (_discover->serviceDiscover(conn, method, detail,strategy, false, key)) {
-                    host = detail.host;
+                if (_discover->serviceDiscover(conn, method, details, strategy, false, key)) {
                     {
                         std::unique_lock<std::mutex> lock(_tracked_mutex);
                         _tracked_methods.insert(method);
@@ -194,6 +190,28 @@ namespace lcz_rpc
             muduo::net::EventLoopThread _health_loop;//健康检查线程
             muduo::net::EventLoop* _health_loop_ptr = nullptr;//健康检查线程指针
         };
+
+        // HostInfo 的哈希仿函数：std::pair 没有 std::hash 特化，需要自定义
+        struct HostInfoHash
+        {
+            size_t operator()(const HostInfo &host)const
+            {
+                return std::hash<std::string>{}(host.first + std::to_string(host.second));
+            }
+        };
+
+        // 从候选列表取下一个没试过的 host。全部试过后清空重来，
+        // 保证单实例集群（只有 1 个候选）仍能按 max_retries 重试。
+        inline const HostDetail *pickUntriedCandidate(const std::vector<HostDetail> &candidates,
+                                                      std::unordered_set<HostInfo, HostInfoHash> &tried)
+        {
+            if (candidates.empty()) return nullptr;
+            for (const auto &candidate : candidates)
+                if (tried.find(candidate.host) == tried.end())
+                    return &candidate;
+            tried.clear();
+            return &candidates.front();
+        }
 
         // 指数退避 + 全抖动：delay = random(0, min(max_ms, base_ms * 2^attempt))
         // 全抖动（random[0,exp]）比等比例抖动更能抑制惊群效应，AWS 架构博客推荐。
@@ -263,10 +281,16 @@ namespace lcz_rpc
             [[nodiscard]] bool call(const std::string &method_name, const Json::Value &params, Json::Value &result, const std::string &key = {})
             {
                 RpcError err = RpcError::OK;
+                std::vector<HostDetail> candidates;
+                if (!getCandidates(method_name, key, candidates)) return false;
+                std::unordered_set<HostInfo, HostInfoHash> tried;
                 for (int attempt = 0; ; ++attempt)
                 {
-                    HostInfo host;
-                    BaseClient::ptr client = getClient(method_name, key, &host);
+                    const HostDetail *detail = pickUntriedCandidate(candidates, tried);
+                    if (detail == nullptr) return false;
+                    HostInfo host = detail->host;
+                    tried.insert(host);
+                    BaseClient::ptr client = clientForHost(host);
                     if (client.get() == nullptr)
                     {
                         LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -303,10 +327,16 @@ namespace lcz_rpc
             [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, RpcCaller::RpcAsyncRespose &result, const std::string &key = {})
             {
                 RpcError err = RpcError::OK;
+                std::vector<HostDetail> candidates;
+                if (!getCandidates(method_name, key, candidates)) return false;
+                std::unordered_set<HostInfo, HostInfoHash> tried;
                 for (int attempt = 0; ; ++attempt)
                 {
-                    HostInfo host;
-                    BaseClient::ptr client = getClient(method_name, key, &host);
+                    const HostDetail *detail = pickUntriedCandidate(candidates, tried);
+                    if (detail == nullptr) return false;
+                    HostInfo host = detail->host;
+                    tried.insert(host);
+                    BaseClient::ptr client = clientForHost(host);
                     if (client.get() == nullptr)
                     {
                         LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -343,25 +373,29 @@ namespace lcz_rpc
                     std::this_thread::sleep_for(backoffDelayMs(_retry_config, attempt));
                 }
             }
-            // 回调式 RPC 调用
+            // 回调式 RPC 调用（无重试，但按候选顺序跳过不可用主机）
             [[nodiscard]] bool call(const std::string &method_name, Json::Value &params, const RpcCaller::ResponseCallback &cb, const std::string &key = {})
             {
-                HostInfo host;
-                BaseClient::ptr client = getClient(method_name, key, &host);
-                if (client.get() == nullptr)
+                std::vector<HostDetail> candidates;
+                if (!getCandidates(method_name, key, candidates)) return false;
+                for (const auto &detail : candidates)
                 {
-                    LCZ_ERROR("服务获取失败：%s", method_name.c_str());
-                    return false;
+                    HostInfo host = detail.host;
+                    BaseClient::ptr client = clientForHost(host);
+                    if (client.get() == nullptr) continue;
+                    auto conn = client->connection();
+                    if (!conn)
+                    {
+                        LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
+                        // 连接不可用同样是一次失败，必须计入熔断器（详见同步 call）
+                        _caller->onConnectionUnavailable(method_name, hostKey(host));
+                        continue; // 换下一个候选
+                    }
+                    if (_caller->call(conn, method_name, params, cb))
+                        return true; // 已提交到传输层，回调由响应线程触发
+                    // 熔断打开或发送失败：换下一个候选
                 }
-                auto conn = client->connection();
-                if (!conn)
-                {
-                    LCZ_ERROR("连接已断开，服务调用失败：%s", method_name.c_str());
-                    // 连接不可用同样是一次失败，必须计入熔断器（详见同步 call）
-                    _caller->onConnectionUnavailable(method_name, hostKey(host));
-                    return false;
-                }
-                return _caller->call(conn, method_name, params, cb);
+                return false;
             }
             // 纯 Proto RPC 调用（含 Prometheus 客户端指标）
             template<ProtoMessage Req, ProtoMessage Resp>
@@ -370,10 +404,16 @@ namespace lcz_rpc
                            const std::string &key = {})
             {
                 RpcError err = RpcError::OK;
+                std::vector<HostDetail> candidates;
+                if (!getCandidates(method_name, key, candidates)) return false;
+                std::unordered_set<HostInfo, HostInfoHash> tried;
                 for (int attempt = 0; ; ++attempt)
                 {
-                    HostInfo host;
-                    BaseClient::ptr client = getClient(method_name, key, &host);
+                    const HostDetail *detail = pickUntriedCandidate(candidates, tried);
+                    if (detail == nullptr) return false;
+                    HostInfo host = detail->host;
+                    tried.insert(host);
+                    BaseClient::ptr client = clientForHost(host);
                     if (client.get() == nullptr)
                     {
                         LCZ_ERROR("服务获取失败：%s", method_name.c_str());
@@ -485,37 +525,31 @@ namespace lcz_rpc
                 }
                 return client;
             }
-            // 根据 method 获取或创建对应的 RPC 客户端（支持服务发现）
-            // out_host：输出本次选中的 host。连接为空时拿不到 conn->peerAddress()，
-            // 而熔断需要 host 作 key（格式与 hostKey 一致），所以必须由这里带出来
-            BaseClient::ptr getClient(const std::string &method, const std::string &key = {}, HostInfo *out_host = nullptr)
+            // 取本次逻辑调用的候选主机（按策略排序、已去重）。
+            // 一次逻辑调用只取一次列表，重试时按顺序换 host；直连模式只有一个候选。
+            bool getCandidates(const std::string &method, const std::string &key,
+                               std::vector<HostDetail> &candidates)
             {
-                BaseClient::ptr client;
-                if (_enablediscover)
+                candidates.clear();
+                if (!_enablediscover)
                 {
-                    HostDetail detail;
-                    // 先通过服务发现获取提供者的地址信息（key 供 SOURCE_HASH/CONSISTENT_HASH 路由）
-                    bool ret = _discover_client->serviceDiscover(method, detail,_loadbalance_strategy, key);
-                    if (!ret)
-                    {
-                        LCZ_ERROR("服务发现失败");
-                        return BaseClient::ptr();
-                    }
-                    HostInfo host = detail.host;
-                    if (out_host) *out_host = host;
-                    client = getClient(host);
-                    // 如果没有实例化客户端就创建一个新的
-                    if (client.get() == nullptr)
-                    {
-                        client = newClient(host);
-                    }
+                    candidates.push_back(HostDetail{_direct_host, 0});
+                    return true;
                 }
-                else
+                // key 供 SOURCE_HASH/CONSISTENT_HASH 路由
+                if (!_discover_client->serviceDiscover(method, candidates, _loadbalance_strategy, key) ||
+                    candidates.empty())
                 {
-                    client = _rpc_client;
-                    if (out_host) *out_host = _direct_host;
+                    LCZ_ERROR("服务发现失败");
+                    return false;
                 }
-                return client;
+                return true;
+            }
+            // 候选 host → 客户端：直连模式复用唯一的长连接，发现模式走连接池
+            BaseClient::ptr clientForHost(const HostInfo &host)
+            {
+                if (!_enablediscover) return _rpc_client;
+                return getClient(host);
             }
             // 从连接池获取或创建该 host 的客户端
             BaseClient::ptr getClient(const HostInfo &host)
@@ -538,19 +572,10 @@ namespace lcz_rpc
             }
 
         private:
-            // HostInfo 的哈希仿函数：std::pair 没有 std::hash 特化，需要自定义
-            struct HostHash
-            {
-                size_t operator()(const HostInfo &host)const
-                {
-                    std::string all = host.first + std::to_string(host.second);
-                    return std::hash<std::string>{}(all);
-                }
-            };
             std::mutex _mutex;
             bool _enablediscover;
             BaseClient::ptr _rpc_client;
-            std::unordered_map<HostInfo, BaseClient::ptr, HostHash> _rpc_clients; // 连接池（长连接），收到 OFFLINE 通知后通过 delClient 回调删除
+            std::unordered_map<HostInfo, BaseClient::ptr, HostInfoHash> _rpc_clients; // 连接池（长连接），收到 OFFLINE 通知后通过 delClient 回调删除
             Requestor::ptr _requestor;
             ClientDiscover::ptr _discover_client; // 服务发现客户端
             CircuitBreaker::ptr _breaker;         // 熔断器（必须在 _caller 之前声明）

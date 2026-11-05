@@ -183,3 +183,101 @@ TEST(ConsistentHashTest, ConsistentHashRemapsLessThanModulo)
     // 取模哈希加节点后约 (N-1)/(N+1)=80% 重映射，一致性哈希约 1/(N+1)=20%
     EXPECT_LT(ch_remap * 2, sh_remap);
 }
+
+// ===================== 候选列表（重试时换 host） =====================
+
+namespace
+{
+    // 校验候选列表覆盖全部主机且无重复；返回 false 时调用方不得继续索引
+    bool expectPermutation(const std::vector<lcz_rpc::HostDetail> &list, int n)
+    {
+        std::set<HostInfo> seen;
+        for (const auto &d : list)
+            seen.insert(d.host);
+        EXPECT_EQ(list.size(), static_cast<size_t>(n));
+        EXPECT_EQ(seen.size(), static_cast<size_t>(n));
+        return list.size() == static_cast<size_t>(n) && seen.size() == static_cast<size_t>(n);
+    }
+}
+
+// 轮询：候选列表从当前轮次起点展开，下一次调用从下一台开始
+TEST(SelectHostsTest, RoundRobinStartsAtNextHost)
+{
+    // 两个同初始状态的实例：单主机接口与候选列表的首元素必须一致
+    MethodHost single, multi;
+    fillHosts(single, 4);
+    fillHosts(multi, 4);
+    auto first = single.selectHost(LoadBalanceStrategy::ROUND_ROBIN).host;
+    auto list = multi.selectHosts(LoadBalanceStrategy::ROUND_ROBIN);
+    ASSERT_TRUE(expectPermutation(list, 4));
+    EXPECT_EQ(list.front().host, first);
+    // 每次调用轮询索引只推进一次，下一次从上一个候选的第二个开始
+    auto list2 = multi.selectHosts(LoadBalanceStrategy::ROUND_ROBIN);
+    EXPECT_EQ(list2.front().host, list[1].host);
+}
+
+// 一致性哈希：首元素与 selectHost 一致，后续元素沿环顺时针覆盖其余主机
+// —— 这正是重试能真正换一台主机的保证
+TEST(SelectHostsTest, ConsistentHashStartsWithPrimaryAndCoversAll)
+{
+    MethodHost mh;
+    fillHosts(mh, 5);
+    auto primary = mh.selectHost(LoadBalanceStrategy::CONSISTENT_HASH, "user-42").host;
+    auto list = mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, "user-42");
+    ASSERT_TRUE(expectPermutation(list, 5));
+    EXPECT_EQ(list.front().host, primary);
+    EXPECT_NE(list[1].host, primary);
+}
+
+// 取模哈希：首元素与 selectHost 一致，候选覆盖全部主机
+TEST(SelectHostsTest, SourceHashStartsWithPrimaryAndCoversAll)
+{
+    MethodHost mh;
+    fillHosts(mh, 4);
+    auto primary = mh.selectHost(LoadBalanceStrategy::SOURCE_HASH, "user-7").host;
+    auto list = mh.selectHosts(LoadBalanceStrategy::SOURCE_HASH, "user-7");
+    ASSERT_TRUE(expectPermutation(list, 4));
+    EXPECT_EQ(list.front().host, primary);
+}
+
+// 最低负载：候选按负载升序，重试优先换到次低负载的主机
+TEST(SelectHostsTest, LowestLoadOrdersByAscendingLoad)
+{
+    MethodHost mh;
+    mh.appendHost(HostInfo("10.0.0.1", 8080), 5);
+    mh.appendHost(HostInfo("10.0.0.2", 8080), 1);
+    mh.appendHost(HostInfo("10.0.0.3", 8080), 3);
+    auto list = mh.selectHosts(LoadBalanceStrategy::LOWEST_LOAD);
+    ASSERT_TRUE(expectPermutation(list, 3));
+    EXPECT_EQ(list[0].host, HostInfo("10.0.0.2", 8080));
+    EXPECT_EQ(list[1].host, HostInfo("10.0.0.3", 8080));
+    EXPECT_EQ(list[2].host, HostInfo("10.0.0.1", 8080));
+
+    // 同负载组内：单次选择与候选列表首元素必须一致（都按 _idx 轮询打散）
+    MethodHost single, multi;
+    fillHosts(single, 3);
+    fillHosts(multi, 3);
+    for (int i = 0; i < 3; ++i)
+    {
+        EXPECT_EQ(single.selectHost(LoadBalanceStrategy::LOWEST_LOAD).host,
+                  multi.selectHosts(LoadBalanceStrategy::LOWEST_LOAD).front().host);
+    }
+}
+
+// 随机：候选是全部主机的一个排列
+TEST(SelectHostsTest, RandomIsPermutation)
+{
+    MethodHost mh;
+    fillHosts(mh, 6);
+    ASSERT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::RANDOM), 6));
+}
+
+// 空 key 退化随机、空主机列表返回空，均不崩溃
+TEST(SelectHostsTest, EmptyKeyAndEmptyHosts)
+{
+    MethodHost mh;
+    EXPECT_TRUE(mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, "k").empty());
+    fillHosts(mh, 3);
+    ASSERT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::CONSISTENT_HASH, ""), 3));
+    ASSERT_TRUE(expectPermutation(mh.selectHosts(LoadBalanceStrategy::SOURCE_HASH, ""), 3));
+}
