@@ -1,7 +1,60 @@
 #include "./shm_channel.hpp"
+#include <signal.h>
 
 namespace lcz_rpc
 {
+    namespace
+    {
+        // 同名段是否为已退出进程的残留：只有能证明创建者已死才清理。
+        // 存活创建者（包括初始化中途）一律不动，避免两个 Server 互相踩。
+        bool reclaim_stale_segment(const std::string &name)
+        {
+            int fd = shm_open(name.c_str(), O_RDWR, 0);
+            if (fd < 0)
+                return false;
+
+            struct stat st;
+            if (fstat(fd, &st) < 0 || static_cast<size_t>(st.st_size) < SHM_CTRL_SIZE)
+            {
+                // 创建者可能刚 shm_open、还没 ftruncate，无法判断，不动
+                close(fd);
+                return false;
+            }
+
+            void *addr = mmap(nullptr, SHM_CTRL_SIZE, PROT_READ, MAP_SHARED, fd, 0);
+            if (addr == MAP_FAILED)
+            {
+                close(fd);
+                return false;
+            }
+
+            auto *ctrl = static_cast<ShmControl *>(addr);
+            bool ready = ctrl->ready.load(std::memory_order_acquire);
+            uint32_t magic = ctrl->magic.load(std::memory_order_relaxed);
+            uint32_t version = ctrl->version.load(std::memory_order_relaxed);
+            int32_t pid = ctrl->creator_pid.load(std::memory_order_relaxed);
+
+            bool stale = false;
+            if (pid > 0)
+            {
+                // ESRCH ⇒ 创建者已退出；0/EPERM ⇒ 仍存活
+                if (kill(static_cast<pid_t>(pid), 0) != 0 && errno == ESRCH)
+                    stale = true;
+            }
+            else if (ready && (magic != SHM_MAGIC || version != SHM_VERSION))
+            {
+                // 旧格式段没有 pid：仅在已就绪（不与初始化写竞争）且布局不兼容时回收
+                stale = true;
+            }
+
+            munmap(addr, SHM_CTRL_SIZE);
+            close(fd);
+            if (!stale)
+                return false;
+            return shm_unlink(name.c_str()) == 0;
+        }
+    }
+
     // ====== Server 端 ======
     bool ShmChannel::create(const std::string &name, size_t req_buf_size, size_t resp_buf_size)
     {
@@ -15,6 +68,23 @@ namespace lcz_rpc
             O_CREAT | O_RDWR | O_EXCL,
             S_IRUSR | S_IWUSR // 仅 owner 读写
         );
+        if (fd < 0 && errno == EEXIST)
+        {
+            // 只有创建者已退出的残留段才回收；存活 Server 的段保持 O_EXCL 保护
+            if (reclaim_stale_segment(name))
+            {
+                LCZ_WARN("reclaimed stale shm %s, retrying create", name.c_str());
+                fd = shm_open(
+                    name.c_str(),
+                    O_CREAT | O_RDWR | O_EXCL,
+                    S_IRUSR | S_IWUSR
+                );
+            }
+            else
+            {
+                LCZ_ERROR("shm %s already exists with a live creator", name.c_str());
+            }
+        }
         if (fd < 0)
         {
             LCZ_ERROR("shm_open %s failed, errno=%d", name.c_str(), errno);
@@ -52,6 +122,10 @@ namespace lcz_rpc
         // 4. placement new：在 mmap 原始内存上构造 ShmControl
         //    std::atomic 有内部状态，不能 memcpy，必须原地构造
         _ctrl = new (_addr) ShmControl();
+        // 先写 pid，再写格式字段：EEXIST 的竞争者看到 pid 就不会误判为可回收
+        _ctrl->creator_pid.store(static_cast<int32_t>(getpid()), std::memory_order_relaxed);
+        _ctrl->magic.store(SHM_MAGIC, std::memory_order_relaxed);
+        _ctrl->version.store(SHM_VERSION, std::memory_order_relaxed);
         _ctrl->req_channel.data_size = req_buf_size;
         _ctrl->resp_channel.data_size = resp_buf_size;
         LCZ_DEBUG("placement new ShmControl at addr=%p, req_data_size=%zu resp_data_size=%zu",
@@ -126,7 +200,22 @@ namespace lcz_rpc
         }
         LCZ_DEBUG("server ready detected");
 
-        // 6. 从控制区读 data_size，计算两个数据区的起始指针
+        // 6. 校验魔数/版本：残留段或旧格式段按错误布局解析会读坏内存，直接拒绝
+        uint32_t magic = _ctrl->magic.load(std::memory_order_relaxed);
+        uint32_t version = _ctrl->version.load(std::memory_order_relaxed);
+        if (magic != SHM_MAGIC || version != SHM_VERSION)
+        {
+            LCZ_ERROR("shm %s incompatible: magic=0x%x version=%u (expect 0x%x/%u), stale segment? try: rm /dev/shm/%s",
+                      name.c_str(), magic, version,
+                      SHM_MAGIC, SHM_VERSION, name.c_str());
+            munmap(_addr, _total_size);
+            _addr = nullptr;
+            _ctrl = nullptr;
+            close(fd);
+            return false;
+        }
+
+        // 7. 从控制区读 data_size，计算两个数据区的起始指针
         size_t req_size = _ctrl->req_channel.data_size;
         size_t resp_size = _ctrl->resp_channel.data_size;
         _req_data = static_cast<char *>(_addr) + SHM_CTRL_SIZE;

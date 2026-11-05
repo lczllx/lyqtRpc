@@ -62,6 +62,107 @@ TEST_F(ShmChannelTest, DoubleCreateFails) {
     ch1.destroy();
 }
 
+// 创建者已退出的残留段：create 回收后重建，而不是永久失败
+TEST_F(ShmChannelTest, StaleSegmentWithDeadCreatorIsReclaimed) {
+    const char *name = "/test_shm_stale";
+    shm_unlink(name);
+    const size_t total = lcz_rpc::SHM_CTRL_SIZE + 64 + 64;
+
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, total), 0);
+    void *addr = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(addr, MAP_FAILED);
+    auto *ctrl = new (addr) lcz_rpc::ShmControl();
+    ctrl->creator_pid.store(INT32_MAX); // 不存在的 pid
+    ctrl->magic.store(lcz_rpc::SHM_MAGIC);
+    ctrl->version.store(lcz_rpc::SHM_VERSION);
+    ctrl->ready.store(true, std::memory_order_release);
+    munmap(addr, total);
+    close(fd);
+
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create(name, 64, 64));
+    ASSERT_TRUE(ch.write_request("reclaimed", MsgType::REQ_RPC_PROTO));
+    std::string out; MsgType t;
+    ASSERT_TRUE(ch.read_request(out, t));
+    EXPECT_EQ(out, "reclaimed");
+
+    ch.destroy();
+    shm_unlink(name);
+}
+
+// 旧格式残留（没有 pid 字段，magic/version 为 0）：ready 后布局不兼容，同样回收
+TEST_F(ShmChannelTest, OldFormatSegmentIsReclaimed) {
+    const char *name = "/test_shm_old_format";
+    shm_unlink(name);
+    const size_t total = lcz_rpc::SHM_CTRL_SIZE + 64 + 64;
+
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, total), 0);
+    void *addr = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(addr, MAP_FAILED);
+    auto *ctrl = new (addr) lcz_rpc::ShmControl();
+    ctrl->ready.store(true, std::memory_order_release); // pid/magic/version 保持 0
+    munmap(addr, total);
+    close(fd);
+
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create(name, 64, 64));
+    ch.destroy();
+    shm_unlink(name);
+}
+
+// 残留段 ready=true 但魔数不对：open 拒绝，不按错误布局解析
+TEST_F(ShmChannelTest, OpenRejectsInvalidMagic) {
+    const char *name = "/test_shm_bad_magic";
+    shm_unlink(name);
+    const size_t total = lcz_rpc::SHM_CTRL_SIZE + 64 + 64;
+
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, total), 0);
+    void *addr = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(addr, MAP_FAILED);
+    auto *ctrl = new (addr) lcz_rpc::ShmControl();
+    ctrl->creator_pid.store(1);
+    ctrl->req_channel.data_size = 64;
+    ctrl->resp_channel.data_size = 64;
+    ctrl->ready.store(true, std::memory_order_release); // magic/version 保持 0
+    munmap(addr, total);
+    close(fd);
+
+    ShmChannel ch;
+    EXPECT_FALSE(ch.open(name));
+    shm_unlink(name);
+}
+
+// 版本不匹配同样拒绝
+TEST_F(ShmChannelTest, OpenRejectsVersionMismatch) {
+    const char *name = "/test_shm_bad_version";
+    shm_unlink(name);
+    const size_t total = lcz_rpc::SHM_CTRL_SIZE + 64 + 64;
+
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, total), 0);
+    void *addr = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(addr, MAP_FAILED);
+    auto *ctrl = new (addr) lcz_rpc::ShmControl();
+    ctrl->magic.store(lcz_rpc::SHM_MAGIC);
+    ctrl->version.store(lcz_rpc::SHM_VERSION + 1);
+    ctrl->req_channel.data_size = 64;
+    ctrl->resp_channel.data_size = 64;
+    ctrl->ready.store(true, std::memory_order_release);
+    munmap(addr, total);
+    close(fd);
+
+    ShmChannel ch;
+    EXPECT_FALSE(ch.open(name));
+    shm_unlink(name);
+}
+
 // 重复 open 同一个通道 → 第二次失败（_addr 已非空）
 TEST_F(ShmChannelTest, DoubleOpenFails) {
     ShmChannel ch1, ch2;

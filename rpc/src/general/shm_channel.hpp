@@ -29,6 +29,8 @@
 namespace lcz_rpc
 {
     static constexpr size_t SHM_CTRL_SIZE = 4096;
+    static constexpr uint32_t SHM_MAGIC = 0x4C435A53; // "LCZS"
+    static constexpr uint32_t SHM_VERSION = 1;
 
     struct ShmRingBuf
     {
@@ -45,6 +47,12 @@ namespace lcz_rpc
         // Server create() 完成后 store(true, release)，Client 忙等 load(acquire)
         std::atomic<bool> ready{false};
 
+        // 残留段/旧格式检测：Client 在 ready 之后校验，不匹配直接拒绝。
+        // creator_pid 用于 Server 在 EEXIST 时判断同名段是否还活着。
+        std::atomic<uint32_t> magic{0};
+        std::atomic<uint32_t> version{0};
+        std::atomic<int32_t> creator_pid{0};
+
         ShmRingBuf req_channel;  // Client→Server
         ShmRingBuf resp_channel; // Server→Client
     };
@@ -60,7 +68,7 @@ namespace lcz_rpc
 
         // ====== Server 端 ======
         bool create(const std::string &name, size_t req_buf_size, size_t resp_buf_size);
-        //   shm_open(O_CREAT|O_RDWR, 0666)
+        //   shm_open(O_CREAT|O_RDWR|O_EXCL, 0600)；EEXIST 时仅回收创建者已退出的残留段
         //   → ftruncate(CTRL_SIZE + req_size + resp_size)
         //   → mmap(MAP_SHARED)
         //   → placement new ShmControl(_addr)
