@@ -31,6 +31,7 @@ namespace lcz_rpc
     static constexpr size_t SHM_CTRL_SIZE = 4096;
     static constexpr uint32_t SHM_MAGIC = 0x4C435A53; // "LCZS"
     static constexpr uint32_t SHM_VERSION = 1;
+    static constexpr int SHM_READY_TIMEOUT_MS = 3000; // Client 等待 Server 初始化的上限
 
     struct ShmRingBuf
     {
@@ -75,8 +76,8 @@ namespace lcz_rpc
         //   → ctrl->ready.store(true, release)
 
         // ====== Client 端 ======
-        bool open(const std::string &name);
-        //   shm_open → fstat → mmap → while(!ready.load(acquire)) pause
+        bool open(const std::string &name, int timeout_ms = SHM_READY_TIMEOUT_MS);
+        //   shm_open → fstat → mmap → 等 ready（超时返回 false）→ 校验 magic/version
 
         // ====== 请求方向（Client → Server） ======
         bool write_request(std::string_view body, MsgType type, int max_retries = 3);

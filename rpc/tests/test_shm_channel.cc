@@ -163,6 +163,37 @@ TEST_F(ShmChannelTest, OpenRejectsVersionMismatch) {
     shm_unlink(name);
 }
 
+// 创建者迟迟不 ready：open 超时返回，而不是永久自旋
+TEST_F(ShmChannelTest, OpenTimesOutWhenNotReady) {
+    const char *name = "/test_shm_not_ready";
+    shm_unlink(name);
+    const size_t total = lcz_rpc::SHM_CTRL_SIZE + 64 + 64;
+
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, total), 0);
+    void *addr = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(addr, MAP_FAILED);
+    auto *ctrl = new (addr) lcz_rpc::ShmControl();
+    ctrl->creator_pid.store(static_cast<int32_t>(getpid()));
+    ctrl->magic.store(lcz_rpc::SHM_MAGIC);
+    ctrl->version.store(lcz_rpc::SHM_VERSION);
+    ctrl->req_channel.data_size = 64;
+    ctrl->resp_channel.data_size = 64;
+    // ready 保持 false，模拟创建者初始化中途死亡
+    munmap(addr, total);
+    close(fd);
+
+    ShmChannel ch;
+    auto start = std::chrono::steady_clock::now();
+    EXPECT_FALSE(ch.open(name, 50));
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - start).count();
+    EXPECT_LT(elapsed, 1000);
+
+    shm_unlink(name);
+}
+
 // 重复 open 同一个通道 → 第二次失败（_addr 已非空）
 TEST_F(ShmChannelTest, DoubleOpenFails) {
     ShmChannel ch1, ch2;

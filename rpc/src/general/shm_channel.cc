@@ -1,5 +1,6 @@
 #include "./shm_channel.hpp"
 #include <signal.h>
+#include <chrono>
 
 namespace lcz_rpc
 {
@@ -148,7 +149,7 @@ namespace lcz_rpc
     }
 
     // ====== Client 端 ======
-    bool ShmChannel::open(const std::string &name)
+    bool ShmChannel::open(const std::string &name, int timeout_ms)
     {
         LCZ_DEBUG("ShmChannel::open name=%s", name.c_str());
 
@@ -191,12 +192,25 @@ namespace lcz_rpc
         // 4. 取控制区指针 — Server 已用 placement new 原地构造好，直接转
         _ctrl = static_cast<ShmControl *>(_addr);
 
-        // 5. 自旋等 Server 就绪。acquire 保证看到 data_size 等初始化值
-        LCZ_DEBUG("waiting for server ready (spin acquire)...");
+        // 5. 自旋等 Server 就绪。acquire 保证看到 data_size 等初始化值。
+        //    创建者中途死亡时 ready 永远不会置位，必须有上限，否则调用线程永久挂死。
+        LCZ_DEBUG("waiting for server ready (spin acquire, timeout=%dms)...", timeout_ms);
+        const auto deadline = std::chrono::steady_clock::now() +
+                              std::chrono::milliseconds(timeout_ms);
         while (!_ctrl->ready.load(std::memory_order_acquire))
         {
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                int32_t pid = _ctrl->creator_pid.load(std::memory_order_relaxed);
+                LCZ_ERROR("shm %s not ready after %dms (creator_pid=%d), stale segment? try: rm /dev/shm/%s",
+                          name.c_str(), timeout_ms, pid, name.c_str());
+                munmap(_addr, _total_size);
+                _addr = nullptr;
+                _ctrl = nullptr;
+                close(fd);
+                return false;
+            }
             __asm__("pause");
-            // Server 在 us 级就绪，不忙太久
         }
         LCZ_DEBUG("server ready detected");
 
