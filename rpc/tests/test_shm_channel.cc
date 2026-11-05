@@ -153,6 +153,61 @@ TEST_F(ShmChannelTest, WrapAroundWithSkipFrame) {
     ch.destroy();
 }
 
+// 尾部只剩 1–3 字节：生产者写不下完整 4B 跳过标记，只清零残尾。
+// 消费者必须跳过残尾，不能按 4B 读 frame_len（请求方向会读进响应区）
+TEST_F(ShmChannelTest, PartialSkipFrameAtTailRequest) {
+    static const size_t SZ = 64;
+    for (size_t tail = 1; tail <= 3; ++tail) {
+        SCOPED_TRACE(tail);
+        std::string name = "/test_shm_partial_req_" + std::to_string(tail);
+        shm_unlink(name.c_str());
+
+        ShmChannel ch;
+        ASSERT_TRUE(ch.create(name, SZ, SZ));
+
+        // 响应区写入非零数据：旧实现越界读到它，会把垃圾当 frame_len
+        ASSERT_TRUE(ch.write_response("XYZ", MsgType::RSP_RPC_PROTO));
+
+        // frame_len = SZ - tail → write_idx 停在尾部剩 tail 字节处
+        std::string aligner(SZ - 8 - tail, 'A');
+        ASSERT_TRUE(ch.write_request(aligner, MsgType::REQ_RPC_PROTO));
+        std::string tmp; MsgType t;
+        ASSERT_TRUE(ch.read_request(tmp, t));
+
+        // 触发 wrap：生产者写部分跳过标记，再从头部写新帧
+        ASSERT_TRUE(ch.write_request("x", MsgType::REQ_RPC_PROTO));
+        ASSERT_TRUE(ch.read_request(tmp, t));
+        EXPECT_EQ(tmp, "x");
+        EXPECT_EQ(t, MsgType::REQ_RPC_PROTO);
+
+        ch.destroy();
+        shm_unlink(name.c_str());
+    }
+}
+
+// 响应方向同理：总大小 8192 时响应区末尾正好是页边界，
+// 按 4B 越界读会跨进未映射页（SIGSEGV）
+TEST_F(ShmChannelTest, PartialSkipFrameAtTailResponse) {
+    static const size_t SZ = 2048; // 4096 + 2048 + 2048 = 8192
+    shm_unlink("/test_shm_partial_resp");
+
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_partial_resp", SZ, SZ));
+
+    std::string aligner(SZ - 8 - 1, 'A'); // frame_len = SZ - 1，尾巴剩 1 字节
+    ASSERT_TRUE(ch.write_response(aligner, MsgType::RSP_RPC_PROTO));
+    std::string tmp; MsgType t;
+    ASSERT_TRUE(ch.read_response(tmp, t));
+
+    ASSERT_TRUE(ch.write_response("x", MsgType::RSP_RPC_PROTO));
+    ASSERT_TRUE(ch.read_response(tmp, t));
+    EXPECT_EQ(tmp, "x");
+    EXPECT_EQ(t, MsgType::RSP_RPC_PROTO);
+
+    ch.destroy();
+    shm_unlink("/test_shm_partial_resp");
+}
+
 // -----------------------------------------------------------------------------
 // §4 边界条件
 // -----------------------------------------------------------------------------

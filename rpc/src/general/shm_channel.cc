@@ -206,7 +206,6 @@ namespace lcz_rpc
                 w += contig;
                 offset = 0;
                 // 跳过后重新检查
-                contig = r % ds;
                 if (ds - (w - r) < frame_len)
                 {
                     LCZ_DEBUG("write_to after wrap still full, retrying");
@@ -248,13 +247,24 @@ namespace lcz_rpc
 
         uint64_t ds = ch.data_size;
         uint64_t offset = r % ds; // 环形偏移
+        uint64_t contig = ds - offset; // 从当前位置到 buffer 末尾的连续字节数
 
-        // 2. 读帧头 4B → frame_len
+        // 2. 尾部不足 4 字节时，生产者只能写部分跳过标记（写不下完整的 4B 帧头）。
+        //    这里不能按 4B 读 frame_len：请求方向会读进响应区，响应方向会越出 mmap。
+        //    真实帧至少 8 字节且必须连续，所以 contig < 4 只可能是跳过标记的残尾。
+        if (contig < 4)
+        {
+            LCZ_DEBUG("read_from hit partial skip frame, jumping %lu bytes to buffer head", contig);
+            ch.read_idx.store(r + contig, std::memory_order_release);
+            return read_from(ch, data_base, body, type);
+        }
+
+        // 3. 读帧头 4B → frame_len
         uint32_t frame_len;
         memcpy(&frame_len, data_base + offset, 4);
         LCZ_DEBUG("read_from offset=%lu frame_len=%u", offset, frame_len);
 
-        // 3. frame_len == 0 → 生产者写的跳过帧
+        // 4. frame_len == 0 → 生产者写的跳过帧
         //    直接跳到 buffer 头，重试一次
         if (frame_len == 0)
         {
@@ -264,18 +274,18 @@ namespace lcz_rpc
             return read_from(ch, data_base, body, type);
         }
 
-        // 4. 读 msg_type（4B int32 → MsgType 枚举）
+        // 5. 读 msg_type（4B int32 → MsgType 枚举）
         int32_t mt;
         memcpy(&mt, data_base + offset + 4, 4);
         type = static_cast<MsgType>(mt);
 
-        // 5. 读 body（frame_len - 8 字节，减去帧头）
+        // 6. 读 body（frame_len - 8 字节，减去帧头）
         body.assign(data_base + offset + 8, frame_len - 8);
 
         LCZ_DEBUG("read_from done: type=%d body_len=%zu new_read_idx=%lu",
                   static_cast<int>(type), body.size(), r + frame_len);
 
-        // 6. 确认消费完成，挪 read_idx
+        // 7. 确认消费完成，挪 read_idx
         ch.read_idx.store(r + frame_len, std::memory_order_release);
         return true;
     }
