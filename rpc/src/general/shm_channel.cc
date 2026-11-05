@@ -442,6 +442,10 @@ namespace lcz_rpc
         LCZ_DEBUG("ShmChannel::destroy name=%s addr=%p shm_fd=%d is_creator=%d",
                   _name.c_str(), _addr, _shm_fd, _is_creator);
 
+        // 0. 创建者退出前撤掉 ready，对端后台线程据此判定连接已断开
+        if (_is_creator && _ctrl)
+            _ctrl->ready.store(false, std::memory_order_release);
+
         // 1. munmap：解除虚拟地址空间映射
         if (_addr)
         {
@@ -468,6 +472,23 @@ namespace lcz_rpc
         _resp_data = nullptr;
         LCZ_DEBUG("ShmChannel::destroy done");
     }
+    // ====== 对端存活检查 ======
+    // 客户端用：ready 被创建者撤掉，或创建者进程已不存在（kill(pid,0)=ESRCH），
+    // 都说明这条通道不会再有人处理请求。pid<=0 或 pid 是自己时无法/无需判断。
+    bool ShmChannel::peerAlive() const
+    {
+        if (!_ctrl)
+            return false;
+        if (!_ctrl->ready.load(std::memory_order_acquire))
+            return false;
+        int32_t pid = _ctrl->creator_pid.load(std::memory_order_relaxed);
+        if (pid <= 0 || pid == getpid())
+            return true;
+        if (::kill(static_cast<pid_t>(pid), 0) == 0)
+            return true;
+        return errno != ESRCH; // EPERM 等说明进程还在，只是没权限发信号
+    }
+
     // ====== SCM_RIGHTS 工具函数：跨进程传递文件描述符 ======
     // 内核做的事：在目标进程的 fd 表中创建新条目，指向同一个 struct file
     // 所以两个进程里的 fd 编号可以不同，但它们指向同一个 eventfd 内核对象

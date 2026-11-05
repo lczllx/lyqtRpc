@@ -13,6 +13,7 @@
 
 #include "abstract.hpp"
 #include <functional>
+#include <atomic>
 #include <string>
 #include <string_view>
 
@@ -36,12 +37,15 @@ namespace lcz_rpc
             return _sender ? _sender(msg) : false;
         }
         void shutdown() override {}                // SHM 没有连接可关
-        bool connected() override { return true; } // SHM 通道打开即视为已连接
+        // 传输层检测到对端消失/通道不可用时调用；此后 Router/发现路径不再使用该连接
+        void markDead() { _alive.store(false, std::memory_order_release); }
+        bool connected() override { return _alive.load(std::memory_order_acquire); }
         std::string peerAddress() const override { return "shm://" + _name; }
 
     private:
         Sender _sender;    // Server 端 = write_response, Client 端 = send
         std::string _name; // 日志标识，如 "shm_server" / "shm_client"
+        std::atomic<bool> _alive{true}; // 对端存活状态，由传输层后台线程/发送失败置 false
     };
 
 } // namespace lcz_rpc

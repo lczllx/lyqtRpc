@@ -92,6 +92,8 @@ namespace lcz_rpc
         {
             std::string body = msg->serialize();
             bool ok = _channel.write_request(body, msg->msgType());
+            if (!ok && !_channel.is_open() && _conn)
+                _conn->markDead(); // 通道已不可用，不是暂时写满
             if (ok)
                 _channel.notify_req();
             return ok;
@@ -102,11 +104,12 @@ namespace lcz_rpc
             _worker.request_stop();
             if (_worker.joinable())
                 _worker.join();
+            if (_conn) _conn->markDead();
             _channel.destroy();
         }
 
         BaseConnection::ptr connection() override { return _conn; }
-        bool connected() override { return _channel.is_open(); }
+        bool connected() override { return _channel.is_open() && _conn && _conn->connected(); }
         ~ShmClient() { shutdown(); }
 
     private:
@@ -129,6 +132,15 @@ namespace lcz_rpc
                 if (n < 0)
                     break;
 
+                // 每 500ms 超时醒一次：Server 崩溃或已 shutdown 时把连接标死，
+                // 否则 connected() 永远为 true，发现/心跳路径会一直往死通道里写。
+                if (n == 0 && !_channel.peerAlive())
+                {
+                    LCZ_ERROR("[ShmClient] server is gone (shm=%s), marking connection dead", _shm_name.c_str());
+                    if (_conn) _conn->markDead();
+                    break;
+                }
+
                 if (n > 0)
                 {
                     uint64_t val;
@@ -146,6 +158,8 @@ namespace lcz_rpc
                     }
                 }
             }
+            if (!st.stop_requested() && _conn)
+                _conn->markDead(); // epoll 出错等非主动退出
             close(epfd);
         }
 

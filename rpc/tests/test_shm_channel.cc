@@ -8,6 +8,7 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
+#include <memory>
 #include <thread>
 #include <chrono>
 
@@ -418,10 +419,63 @@ TEST_F(ShmChannelTest, ShmConnectionSendDelegates) {
     EXPECT_FALSE(conn.send(msg));
 }
 
-// connected() 始终为 true（SHM 通道打开即视为连接）
-TEST_F(ShmChannelTest, ShmConnectionAlwaysConnected) {
+// 新建连接默认存活；传输层标记断开后 connected() 立即变 false
+TEST_F(ShmChannelTest, ShmConnectionTracksLiveness) {
     lcz_rpc::ShmConnection conn;
     EXPECT_TRUE(conn.connected());
+    conn.markDead();
+    EXPECT_FALSE(conn.connected());
+}
+
+// 创建者就是本进程：peerAlive() 为 true
+TEST_F(ShmChannelTest, PeerAliveForOwnSegment) {
+    const char *name = "/test_shm_peer_alive";
+    shm_unlink(name);
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create(name, 64, 64));
+    EXPECT_TRUE(ch.peerAlive());
+    ch.destroy();
+}
+
+// 创建者进程已不存在（kill(pid,0)=ESRCH）：peerAlive() 为 false
+TEST_F(ShmChannelTest, PeerGoneWhenCreatorPidDead) {
+    const char *name = "/test_shm_peer_dead";
+    shm_unlink(name);
+    const size_t total = lcz_rpc::SHM_CTRL_SIZE + 64 + 64;
+    int fd = shm_open(name, O_CREAT | O_RDWR | O_EXCL, S_IRUSR | S_IWUSR);
+    ASSERT_GE(fd, 0);
+    ASSERT_EQ(ftruncate(fd, total), 0);
+    void *addr = mmap(nullptr, total, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    ASSERT_NE(addr, MAP_FAILED);
+    auto *ctrl = new (addr) lcz_rpc::ShmControl();
+    ctrl->magic.store(lcz_rpc::SHM_MAGIC);
+    ctrl->version.store(lcz_rpc::SHM_VERSION);
+    ctrl->creator_pid.store(INT32_MAX); // 不存在的 pid
+    ctrl->req_channel.data_size = 64;
+    ctrl->resp_channel.data_size = 64;
+    ctrl->ready.store(true, std::memory_order_release);
+    munmap(addr, total);
+    close(fd);
+
+    ShmChannel ch;
+    ASSERT_TRUE(ch.open(name));
+    EXPECT_FALSE(ch.peerAlive());
+    ch.destroy();
+    shm_unlink(name);
+}
+
+// 创建者 destroy() 后 ready 被撤掉：已打开的对端立即看到断连
+TEST_F(ShmChannelTest, PeerGoneAfterCreatorDestroy) {
+    const char *name = "/test_shm_peer_destroy";
+    shm_unlink(name);
+    ShmChannel server, client;
+    ASSERT_TRUE(server.create(name, 64, 64));
+    ASSERT_TRUE(client.open(name));
+    EXPECT_TRUE(client.peerAlive());
+
+    server.destroy();
+    EXPECT_FALSE(client.peerAlive());
+    client.destroy();
 }
 
 // peerAddress() 返回 shm:// 前缀的标识符
@@ -501,4 +555,28 @@ TEST_F(ShmChannelTest, ServerClientRoundtrip) {
 
     server.stop();
     server_thread.join();
+}
+
+// Server 退出后，Client 后台线程在 500ms 轮询里发现创建者消失并把连接标死
+TEST_F(ShmChannelTest, ClientMarksDeadAfterServerDestroyed) {
+    auto server = std::make_unique<lcz_rpc::ShmServer>(
+        "lcz_shm_test_notify_gone", "lcz_shm_test_gone", 1024*1024, 1024*1024, 16, 1);
+    server->setMessageCallback([](const lcz_rpc::BaseConnection::ptr&, lcz_rpc::BaseMessage::ptr&) {});
+    std::thread server_thread([&]() { server->start(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    lcz_rpc::ShmClient client("lcz_shm_test_notify_gone");
+    client.connect();
+    ASSERT_TRUE(client.connected());
+
+    server->stop();
+    server_thread.join();
+    server.reset(); // 析构里 destroy 所有通道：ready 置 false
+
+    bool dead = false;
+    for (int i = 0; i < 30 && !dead; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        dead = !client.connected();
+    }
+    EXPECT_TRUE(dead);
 }

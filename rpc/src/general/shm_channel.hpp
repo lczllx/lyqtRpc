@@ -130,6 +130,9 @@ namespace lcz_rpc
         // ====== 生命周期 ======
         ~ShmChannel();
         bool is_open() const { return _addr != nullptr; }
+        // 对端（创建者）是否还活着：ready 仍置位且创建者进程存在。
+        // 用于客户端后台线程发现 Server 退出/崩溃后把连接标记为断开。
+        bool peerAlive() const;
         void destroy();
         // munmap → close → shm_unlink（仅 creator）
 
