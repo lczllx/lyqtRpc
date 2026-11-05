@@ -38,16 +38,19 @@ namespace lcz_rpc
     struct CircuitStatus
     {
         CircuitState state = CircuitState::CLOSED; // 熔断器状态
-        int failures = 0;                          // 当前连续失败次数
+        int failures = 0;                          // 滑动窗口内失败次数
+        int successes = 0;                         // 滑动窗口内成功次数
         int half_open = 0;                         // 半开已放行请求数
         int64_t opened_at = 0;                     // Unix 秒时间戳
     };
-    // 熔断器默认限制参数
+    // 熔断器默认限制参数（滑动窗口失败率）
     struct CircuitConfig
     {
-        int failure_threshold = 5;  // 连续失败几次 → OPEN
-        int open_duration_sec = 30; // OPEN 持续多久 → HALF_OPEN
-        int half_open_max_req = 1;  // 半开最多放几条探测
+        int window_size = 20;           // 滑动窗口保留最近多少次调用结果
+        int min_calls = 10;             // 窗口内样本数达到该值才评估失败率（小样本不熔断）
+        int failure_ratio_percent = 50; // 失败率 >= 该百分比 → OPEN
+        int open_duration_sec = 30;     // OPEN 持续多久 → HALF_OPEN
+        int half_open_max_req = 1;      // 半开最多放几条探测
     };
     // RPC 调用失败原因分类：区分「可重试的瞬时故障」与「重试也白搭的业务错误」，
     // 供请求层重试循环判定是否指数退避重试。

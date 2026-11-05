@@ -41,7 +41,9 @@ TEST(PublicConfigTest, RetryConfigDefaults)
 TEST(PublicConfigTest, CircuitConfigDefaults)
 {
     CircuitConfig cfg;
-    EXPECT_EQ(cfg.failure_threshold, 5);
+    EXPECT_EQ(cfg.window_size, 20);
+    EXPECT_EQ(cfg.min_calls, 10);
+    EXPECT_EQ(cfg.failure_ratio_percent, 50);
     EXPECT_EQ(cfg.open_duration_sec, 30);
     EXPECT_EQ(cfg.half_open_max_req, 1);
 }

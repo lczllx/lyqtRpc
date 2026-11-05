@@ -51,10 +51,12 @@ namespace lcz_rpc
         bool NodeBreaker::onSuccess()
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            _status.failures = 0;
-            _status.half_open = 0;
+            record(true);
             if (_status.state != CircuitState::CLOSED)
             {
+                // 恢复时清空窗口：打开前的历史失败不应该让刚恢复的节点立刻再次熔断
+                clearWindow();
+                _status.half_open = 0;
                 LCZ_INFO("[NodeBreaker] HALF_OPEN/OPEN => CLOSED, 熔断器恢复");
                 _status.state = CircuitState::CLOSED;
                 lcz_rpc::metrics::MetricHooks::onCircuitState(_method, _host, 0);  // CLOSED
@@ -68,17 +70,18 @@ namespace lcz_rpc
         bool NodeBreaker::onFailure()
         {
             std::lock_guard<std::mutex> lock(_mutex);
-            _status.failures++;
+            record(false);
             if (_status.state == CircuitState::CLOSED)
             {
-                if (_status.failures >= _cfg.failure_threshold)
+                if (shouldOpen())
                 {
                     _status.state = CircuitState::OPEN;
                     _opened_since = std::chrono::steady_clock::now();
                     lcz_rpc::metrics::MetricHooks::onCircuitState(_method, _host, 1);  // OPEN
                     _status.opened_at = static_cast<int64_t>(std::time(nullptr));
-                    LCZ_INFO("[NodeBreaker] CLOSED => OPEN, 连续失败%d次达到阈值%d",
-                             _status.failures, _cfg.failure_threshold);
+                    int total = _status.failures + _status.successes;
+                    LCZ_INFO("[NodeBreaker] CLOSED => OPEN, 窗口内失败%d/%d次达到%d%%阈值(最小样本%d)",
+                             _status.failures, total, _cfg.failure_ratio_percent, _cfg.min_calls);
                     return true;
                 }
                 else

@@ -24,11 +24,11 @@ TEST(NodeBreakerTest, ClosedAllowsRequest)
     EXPECT_EQ(nb.status().state, CircuitState::CLOSED);
 }
 
-// 连续失败达到阈值才 OPEN，且第 threshold 次返回 true（状态转换）
-TEST(NodeBreakerTest, FailuresOpenCircuitAtThreshold)
+// 窗口内失败率达到阈值才 OPEN，且状态转换发生在触发阈值的那一次
+TEST(NodeBreakerTest, FailuresOpenAtMinCalls)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 3;
+    cfg.min_calls = 3;
     NodeBreaker nb(cfg);
     EXPECT_FALSE(nb.onFailure()); // failures=1
     EXPECT_FALSE(nb.onFailure()); // failures=2
@@ -41,7 +41,7 @@ TEST(NodeBreakerTest, FailuresOpenCircuitAtThreshold)
 TEST(NodeBreakerTest, OpenBlocksRequestBeforeDuration)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1;
     cfg.open_duration_sec = 1000;
     NodeBreaker nb(cfg);
     nb.onFailure(); // -> OPEN
@@ -53,7 +53,7 @@ TEST(NodeBreakerTest, OpenBlocksRequestBeforeDuration)
 TEST(NodeBreakerTest, OpenTransitionsToHalfOpenAfterDuration)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1;
     cfg.open_duration_sec = 0;
     NodeBreaker nb(cfg);
     nb.onFailure(); // -> OPEN
@@ -66,7 +66,7 @@ TEST(NodeBreakerTest, OpenTransitionsToHalfOpenAfterDuration)
 TEST(NodeBreakerTest, HalfOpenSuccessCloses)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1;
     cfg.open_duration_sec = 0;
     NodeBreaker nb(cfg);
     nb.onFailure();    // -> OPEN
@@ -81,7 +81,7 @@ TEST(NodeBreakerTest, HalfOpenSuccessCloses)
 TEST(NodeBreakerTest, HalfOpenFailureReopens)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1;
     cfg.open_duration_sec = 0;
     NodeBreaker nb(cfg);
     nb.onFailure();    // -> OPEN
@@ -103,13 +103,103 @@ TEST(NodeBreakerTest, SuccessWhileClosedReturnsNoTransition)
 TEST(NodeBreakerTest, HalfOpenLimitsProbeRequests)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1;
     cfg.open_duration_sec = 0;
     cfg.half_open_max_req = 1;
     NodeBreaker nb(cfg);
     nb.onFailure();    // -> OPEN
     EXPECT_TRUE(nb.allowRequest());  // HALF_OPEN，第 1 条探测放行
     EXPECT_FALSE(nb.allowRequest()); // 超过半开上限，拒绝
+}
+
+// ===================== 滑动窗口失败率 =====================
+
+// 失败被成功隔开也算数：旧「连续失败」实现在这里永远不熔断
+TEST(NodeBreakerTest, InterleavedFailuresOpenOnRate)
+{
+    CircuitConfig cfg;
+    cfg.window_size = 4;
+    cfg.min_calls = 4;
+    cfg.failure_ratio_percent = 50;
+    NodeBreaker nb(cfg);
+    EXPECT_FALSE(nb.onFailure()); // 1/1
+    EXPECT_FALSE(nb.onFailure()); // 2/2
+    EXPECT_FALSE(nb.onSuccess()); // 2/3，成功的插入不再清零失败计数
+    EXPECT_TRUE(nb.onFailure());  // 3/4 = 75% >= 50% -> OPEN
+    EXPECT_EQ(nb.status().state, CircuitState::OPEN);
+    EXPECT_EQ(nb.status().failures, 3);
+    EXPECT_EQ(nb.status().successes, 1);
+}
+
+// 失败率低于阈值：样本够了也不熔断
+TEST(NodeBreakerTest, LowFailureRateStaysClosed)
+{
+    CircuitConfig cfg;
+    cfg.window_size = 10;
+    cfg.min_calls = 10;
+    cfg.failure_ratio_percent = 50;
+    NodeBreaker nb(cfg);
+    for (int i = 0; i < 4; ++i) EXPECT_FALSE(nb.onFailure());
+    for (int i = 0; i < 6; ++i) EXPECT_FALSE(nb.onSuccess());
+    EXPECT_EQ(nb.status().state, CircuitState::CLOSED);
+    EXPECT_EQ(nb.status().failures, 4);
+    EXPECT_EQ(nb.status().successes, 6);
+}
+
+// 样本数不足 min_calls：即使 100% 失败也不熔断
+TEST(NodeBreakerTest, BelowMinCallsStaysClosed)
+{
+    CircuitConfig cfg;
+    cfg.window_size = 10;
+    cfg.min_calls = 5;
+    NodeBreaker nb(cfg);
+    for (int i = 0; i < 4; ++i) EXPECT_FALSE(nb.onFailure());
+    EXPECT_EQ(nb.status().state, CircuitState::CLOSED);
+    EXPECT_TRUE(nb.onFailure()); // 第 5 次：5/5 -> OPEN
+    EXPECT_EQ(nb.status().state, CircuitState::OPEN);
+}
+
+// 窗口滚动：旧失败被新成功挤出后，失败率随之回落
+TEST(NodeBreakerTest, WindowRollsOffOldFailures)
+{
+    CircuitConfig cfg;
+    cfg.window_size = 4;
+    cfg.min_calls = 4;
+    cfg.failure_ratio_percent = 75;
+    NodeBreaker nb(cfg);
+    EXPECT_FALSE(nb.onFailure()); // F . . .
+    EXPECT_FALSE(nb.onFailure()); // F F . .
+    EXPECT_FALSE(nb.onSuccess()); // F F S .  -> 2/3 = 66% < 75%
+    EXPECT_FALSE(nb.onSuccess()); // F F S S  -> 2/4 = 50% < 75%
+    EXPECT_FALSE(nb.onSuccess()); // . F S S  -> 1/4 = 25%
+    EXPECT_FALSE(nb.onSuccess()); // . . S S  -> 0/4
+    EXPECT_EQ(nb.status().failures, 0);
+    EXPECT_EQ(nb.status().successes, 4);
+    // 再进 3 次失败：S F F F -> 3/4 = 75% -> OPEN
+    EXPECT_FALSE(nb.onFailure());
+    EXPECT_FALSE(nb.onFailure());
+    EXPECT_TRUE(nb.onFailure());
+    EXPECT_EQ(nb.status().state, CircuitState::OPEN);
+}
+
+// 半开探测成功恢复后窗口清零：打开前的历史失败不能立刻再次熔断
+TEST(NodeBreakerTest, RecoveryClearsWindow)
+{
+    CircuitConfig cfg;
+    cfg.window_size = 4;
+    cfg.min_calls = 3;
+    cfg.failure_ratio_percent = 50;
+    cfg.open_duration_sec = 0;
+    NodeBreaker nb(cfg);
+    nb.onFailure();
+    nb.onFailure();
+    EXPECT_TRUE(nb.onFailure());   // 3/3 -> OPEN
+    EXPECT_TRUE(nb.allowRequest()); // -> HALF_OPEN
+    EXPECT_TRUE(nb.onSuccess());    // -> CLOSED
+    EXPECT_EQ(nb.status().failures, 0);
+    EXPECT_EQ(nb.status().successes, 0);
+    EXPECT_FALSE(nb.onFailure()); // 1/1，样本不足 min_calls=3，不熔断
+    EXPECT_EQ(nb.status().state, CircuitState::CLOSED);
 }
 
 // ===================== CircuitBreaker 管理 + 持久化 =====================
@@ -129,7 +219,7 @@ TEST(CircuitBreakerTest, FailureOpensAndPersists)
 {
     auto store = std::make_shared<MemoryCircuitStore>();
     CircuitConfig cfg;
-    cfg.failure_threshold = 3;
+    cfg.min_calls = 3;
     CircuitBreaker cb(cfg, store);
     cb.onFailure("echo", "h:1");
     cb.onFailure("echo", "h:1");
@@ -143,7 +233,7 @@ TEST(CircuitBreakerTest, SuccessClosesAndPersists)
 {
     auto store = std::make_shared<MemoryCircuitStore>();
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1;
     cfg.open_duration_sec = 0;
     CircuitBreaker cb(cfg, store);
     cb.onFailure("echo", "h:1");    // OPEN

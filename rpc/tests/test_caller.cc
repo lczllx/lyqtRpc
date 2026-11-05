@@ -60,11 +60,11 @@ namespace
     }
 }
 
-// 熔断器打开（failure_threshold=1 + 一次失败）→ 拒绝请求，err=CIRCUIT_OPEN
+// 熔断器打开（min_calls=1 + 一次失败）→ 拒绝请求，err=CIRCUIT_OPEN
 TEST(CallerTest, CircuitOpenReturnsCircuitOpen)
 {
     CircuitConfig cfg;
-    cfg.failure_threshold = 1;
+    cfg.min_calls = 1; // 一次失败（100%）即触发 OPEN
     cfg.open_duration_sec = 1000; // 冷却期内保持 OPEN
     auto breaker = std::make_shared<CircuitBreaker>(cfg, std::make_shared<MemoryCircuitStore>());
     auto requestor = std::make_shared<Requestor>();

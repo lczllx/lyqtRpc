@@ -463,7 +463,11 @@ namespace lcz_rpc
             {
                 CircuitConfig cfg;
                 const char *env;
-                if ((env = std::getenv("LCZ_CB_FAILURE_THRESHOLD"))) cfg.failure_threshold = std::atoi(env);
+                if ((env = std::getenv("LCZ_CB_WINDOW_SIZE")))      cfg.window_size = std::atoi(env);
+                if ((env = std::getenv("LCZ_CB_MIN_CALLS")))        cfg.min_calls = std::atoi(env);
+                // 兼容旧变量：语义已从「连续失败阈值」变为「窗口最小样本数」
+                else if ((env = std::getenv("LCZ_CB_FAILURE_THRESHOLD"))) cfg.min_calls = std::atoi(env);
+                if ((env = std::getenv("LCZ_CB_FAILURE_RATIO")))    cfg.failure_ratio_percent = std::atoi(env);
                 if ((env = std::getenv("LCZ_CB_OPEN_DURATION")))    cfg.open_duration_sec = std::atoi(env);
                 if ((env = std::getenv("LCZ_CB_HALF_OPEN_MAX")))    cfg.half_open_max_req = std::atoi(env);
 
