@@ -15,6 +15,7 @@
 #   test_rate_limiter.cc        TokenBucket 令牌桶限流器
 #   test_serializer.cc          ISerializer / ProtobufSerializer 编解码
 #   test_shm_channel.cc         ShmChannel 共享内存单进程闭环
+#   test_shm_memory_order.cc    SHM ring 内存序：同映射双线程（TSan）+ fork 跨进程往返
 #   test_metrics.cc             Prometheus 指标内存模型（Counter/Gauge/Histogram/导出格式）
 #   test_metrics_server.cc      /metrics HTTP 端点起停 + process_* 采集
 #   test_memory_circuit_store.cc  熔断状态内存存储 save/load/remove
@@ -38,6 +39,7 @@ add_executable(lcz_rpc_unit_tests
   test_rate_limiter.cc
   test_serializer.cc
   test_shm_channel.cc
+  test_shm_memory_order.cc
   test_metrics.cc
   test_metrics_server.cc
   test_memory_circuit_store.cc

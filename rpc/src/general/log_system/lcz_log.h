@@ -19,7 +19,9 @@ inline Logger::ptr getLogger(const std::string&name = "root_logger") {
     return logger;
 }
 
-inline Logger::ptr getrootLogger() {
+// 返回引用：日志宏每调用一次都取一次根日志器，按值返回会拷贝 shared_ptr
+// （原子 RMW），是热路径开销，并会在多线程间制造伪 happens-before。
+inline const Logger::ptr &getrootLogger() {
     return LoggerManager::getInstance().rootLogger();
 }
 

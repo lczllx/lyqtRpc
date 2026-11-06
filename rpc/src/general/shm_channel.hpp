@@ -50,6 +50,14 @@ namespace lcz_rpc
         uint64_t data_size = 0;
         uint32_t _pad;
     };
+    // 跨进程共享的原子量必须无锁且与地址无关：libatomic 的锁表按本进程地址记录，
+    // 两个进程会各锁各的，等于没有互斥。x86_64/aarch64 的整型原子满足该条件。
+    static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                  "SHM ring index must be always lock-free to work across processes");
+    static_assert(std::atomic<uint32_t>::is_always_lock_free,
+                  "SHM control fields must be always lock-free to work across processes");
+    static_assert(std::atomic<bool>::is_always_lock_free,
+                  "SHM ready flag must be always lock-free to work across processes");
 
     /* 让 ShmControl 的起始地址一定是 64 的倍数，
     让 atomic 操作不和无关数据挤在同一个 cache line 上*/

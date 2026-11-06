@@ -32,6 +32,7 @@ add_compile_definitions(
 option(LCZ_RPC_BUILD_EXAMPLES "构建 example 目录中的示例程序" ON)
 option(LCZ_RPC_BUILD_TESTS "构建单元测试（GoogleTest，需系统已安装，如 Ubuntu: libgtest-dev）" OFF)
 option(LCZ_RPC_SANITIZE "启用 AddressSanitizer + UndefinedBehaviorSanitizer（仅测试用，会拖慢 2~5 倍，勿用于生产）" OFF)
+option(LCZ_RPC_TSAN "启用 ThreadSanitizer（数据竞争 / 内存序检测；与 ASan 互斥，需单独建目录）" OFF)
 option(LCZ_RPC_BUILD_FUZZER "构建 libFuzzer 模糊测试目标（需 Clang，-fsanitize=fuzzer 仅 Clang 支持）" OFF)
 
 # ---- Sanitizers：内存错误 / 未定义行为检测 ----
@@ -41,6 +42,19 @@ if(LCZ_RPC_SANITIZE)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer -g)
     add_link_options(-fsanitize=address,undefined)
     message(STATUS "Sanitizers: ASan + UBSan 已启用")
+endif()
+
+# ---- TSan：把「release/acquire 建立了 happens-before」从推理变成机器检查 ----
+# 功能测试在 x86 上无法暴露缺失的 release（store-store 天然有序）：需要
+#   cmake -S rpc -B rpc/build-tsan -DLCZ_RPC_SANITIZE=OFF -DLCZ_RPC_TSAN=ON -DLCZ_RPC_BUILD_TESTS=ON
+#   ./rpc/build-tsan/bin/lcz_rpc_unit_tests --gtest_filter='ShmMemoryOrderTest.*'
+if(LCZ_RPC_TSAN)
+    if(LCZ_RPC_SANITIZE)
+        message(FATAL_ERROR "TSan 与 ASan/UBSan 不能同时启用：-fsanitize=thread 需单独建目录")
+    endif()
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=thread)
+    message(STATUS "Sanitizers: TSan 已启用")
 endif()
 
 # jsoncpp：CONFIG（vcpkg）→ MODULE（apt FindJsonCpp.cmake）→ pkg-config → 手动找

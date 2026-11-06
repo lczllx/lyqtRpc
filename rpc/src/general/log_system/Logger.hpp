@@ -837,7 +837,10 @@ public:
         return nullptr;
     }
 
-    Logger::ptr rootLogger() const
+    // 返回引用来避免每次取日志器都拷贝一次 shared_ptr：那份拷贝是原子 RMW，
+    // 热路径上既贵，又会在调用它的两个线程之间造出伪 happens-before，掩盖真实竞态。
+    // 根日志器只在单例构造时创建，运行期不替换（replaceRootLogger 无调用方）。
+    const Logger::ptr &rootLogger() const
     {
         return _root_logger;
     }
