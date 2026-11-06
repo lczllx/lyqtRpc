@@ -1,4 +1,5 @@
 #include "src/client/rpc_client.hpp"
+#include "src/client/selection_profile.hpp"
 #include "src/general/message.hpp"
 #include "src/general/metrics_server.hpp"
 #include "rpc_envelope.pb.h"
@@ -294,7 +295,21 @@ int main(int argc, char* argv[])
     std::cout << "服务器: " << server_ip << ":" << server_port << std::endl;
     std::cout << "使用服务发现: " << (use_discover ? "是" : "否") << std::endl;
 
+    // 负载均衡策略（只在服务发现模式下生效）：
+    // LCZ_LB_STRATEGY=round_robin|random|source_hash|lowest_load|consistent_hash
+    lcz_rpc::LoadBalanceStrategy lb_strategy = lcz_rpc::LoadBalanceStrategy::ROUND_ROBIN;
+    std::string lb_name = "round_robin";
+    if (const char *env = std::getenv("LCZ_LB_STRATEGY")) {
+        std::string s(env);
+        if (s == "random")               { lb_strategy = lcz_rpc::LoadBalanceStrategy::RANDOM;          lb_name = s; }
+        else if (s == "source_hash")     { lb_strategy = lcz_rpc::LoadBalanceStrategy::SOURCE_HASH;     lb_name = s; }
+        else if (s == "lowest_load")     { lb_strategy = lcz_rpc::LoadBalanceStrategy::LOWEST_LOAD;     lb_name = s; }
+        else if (s == "consistent_hash") { lb_strategy = lcz_rpc::LoadBalanceStrategy::CONSISTENT_HASH; lb_name = s; }
+    }
+    std::cout << "负载均衡策略: " << lb_name << std::endl;
+
     lcz_rpc::client::RpcClient client(use_discover, server_ip, use_discover ? registry_port : server_port);
+    client.setloadbalanceStrategy(lb_strategy);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
     // 测试连接
@@ -368,6 +383,50 @@ int main(int argc, char* argv[])
     }
 
     stats.print();
+
+    // 选主机在位采样：回答「getCandidates 占端到端多少」，
+    // 而不是拿 MethodHost::selectHost 的单函数微基准外推。
+    if (lcz_rpc::profile::selectionProfileEnabled())
+    {
+        const auto samples = lcz_rpc::profile::takeSelectionSamples();
+        const auto sel = lcz_rpc::profile::summarizeSelectionSamples(samples);
+        std::cout << "========== 选主机耗时占比（LCZ_PROFILE_SELECTION）==========" << std::endl;
+        std::cout << "模式: " << (use_discover
+                    ? "服务发现（每请求 serviceDiscover：锁 + map 查找 + selectHosts）"
+                    : "直连（getCandidates 只填一个候选）")
+                  << "，策略: " << lb_name << std::endl;
+        std::cout << "采样次数: " << sel.count << "（对比成功请求 " << stats.success_count << "）" << std::endl;
+        if (sel.count == 0)
+        {
+            std::cout << "未采到样本：getCandidates 采样点没被执行" << std::endl;
+        }
+        else
+        {
+            std::cout << std::fixed << std::setprecision(1)
+                      << "选主机延迟 (ns): mean=" << sel.mean_ns
+                      << " P50=" << sel.p50_ns
+                      << " P90=" << sel.p90_ns
+                      << " P99=" << sel.p99_ns
+                      << " max=" << sel.max_ns << std::endl;
+            // 与延迟统计同口径：stats.latencies 是微秒且 print() 已排序
+            if (!stats.latencies.empty())
+            {
+                const auto &total = stats.latencies;
+                size_t p99_idx = total.size() * 0.99;
+                if (p99_idx >= total.size()) p99_idx = total.size() - 1;
+                double total_sum_ns = 0;
+                for (double us : total) total_sum_ns += us * 1000.0;
+                const double total_p99_ns = total[p99_idx] * 1000.0;
+                const double share_sum = sel.sum_ns / total_sum_ns * 100.0;
+                const double share_p99 = sel.p99_ns / total_p99_ns * 100.0;
+                std::cout << std::setprecision(3)
+                          << "占总耗时: sum(selection)/sum(total)=" << share_sum << "%"
+                          << "  P99(selection)/P99(total)=" << share_p99 << "%" << std::endl;
+            }
+        }
+        std::cout << "==================================\n" << std::endl;
+    }
+
     if (metrics_port > 0)
         lcz_rpc::metrics::MetricsServer::stop();  // join 静态线程，否则析构时 std::terminate
     return 0;

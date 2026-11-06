@@ -6,6 +6,7 @@
 #include "circuit_breaker.hpp"
 #include "rpc_registry.hpp"
 #include "rpc_topic.hpp"
+#include "selection_profile.hpp"
 #include <string>
 #include <vector>
 #include <unordered_set>
@@ -535,6 +536,8 @@ namespace lcz_rpc
             bool getCandidates(const std::string &method, const std::string &key,
                                std::vector<HostDetail> &candidates)
             {
+                // LCZ_PROFILE_SELECTION=1 时记录本段耗时（选主机在端到端中占多少）
+                profile::SelectionScope selection_scope;
                 candidates.clear();
                 if (!_enablediscover)
                 {
