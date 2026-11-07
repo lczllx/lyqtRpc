@@ -4,16 +4,16 @@
 
 [English](README.md)
 
-> 基于 muduo + Protobuf 的轻量级 C++20 RPC 框架。支持 TCP / 共享内存零拷贝双传输模式，集成 etcd 注册中心、熔断器、令牌桶流控、分布式追踪、Prometheus 可观测性、HTTP→RPC API 网关。
+> 基于 muduo + Protobuf 的轻量级 C++20 RPC 框架。支持 TCP / 共享内存双传输模式（SHM 零拷贝限 Protobuf 路径），集成 etcd 注册中心、熔断器、令牌桶流控、分布式追踪、Prometheus 可观测性、HTTP→RPC API 网关。
 
-作者：lczllx · 语言：C++20 · 网络：muduo · 传输：TCP & SHM 零拷贝 · 序列化：Protobuf, JSON, FlatBuffers · 构建：CMake
+作者：lczllx · 语言：C++20 · 网络：muduo · 传输：TCP & SHM（SHM 零拷贝限 Protobuf） · 序列化：Protobuf, JSON, FlatBuffers · 构建：CMake
 
 ## 功能亮点
 
-- **双传输模式**：TCP（LV 变长协议）和 SHM 零拷贝（per-client ring buffer + Protobuf `SerializeToArray` 直写）
+- **双传输模式**：TCP（LV 变长协议）和 SHM 零拷贝（per-client ring buffer + Protobuf `SerializeToArray` 直写；FlatBuffers 读端就地映射 ring，写端仍要拷一次 body）
 - **服务治理**：etcd 注册中心、心跳保活、CAS 选主、负载上报、三态熔断器、令牌桶流控
 - **调用方式**：同步、`std::future` 异步、回调三种模式
-- **序列化可插拔**：`ISerializer` 抽象接口，默认 Protobuf，支持 JSON 调试、FlatBuffers 零拷贝读
+- **序列化可插拔**：`ISerializer` 抽象接口，默认 Protobuf，支持 JSON 调试、FlatBuffers 零拷贝读（写端一次拷贝）
 - **分布式追踪**：`trace_id` + `span_id` 全链路透传
 - **多客户端并发**：SHM 路径服务端 muduo `EventLoopThread` 线程池，per-client 独立 ring buffer
 - **可观测性**：内建 Prometheus `/metrics` 端点（文本协议 0.0.4），暴露请求量/延迟直方图/并发度/错误数/连接数/熔断状态/令牌桶余量/进程级指标，覆盖 brpc `/vars` 核心项
@@ -114,9 +114,10 @@ Provider ──REGISTER/HEARTBEAT──> Registry(etcd) <──DISCOVER── Co
 ```
 
 - **LV 协议帧**：`| 4B total_len | 4B msg_type | 4B id_len | id | body |`
-- **SHM 零拷贝**：`SerializeToArray` 直写 ring buffer → `eventfd` → `ParseFromArray`，绕过 TCP 协议栈
+- **SHM Protobuf 零拷贝**：`SerializeToArray` 直写 ring buffer → `eventfd` → `ParseFromArray`，两端都不拷贝 body（仅当帧跨 ring 尾部时回退一次 string 拷贝），绕过 TCP 协议栈
 - **注册存储**：`LCZ_ETCD` 环境变量切换 Memory/Etcd 后端，默认单机内存模式
-- **熔断器**：三态（CLOSED→OPEN→HALF_OPEN），method×host 粒度，支持内存/etcd 持久化
+- **熔断器**：三态（CLOSED→OPEN→HALF_OPEN），method×host 粒度，状态由进程内 `MemoryCircuitStore` 保存
+- **负载均衡**：ROUND_ROBIN（默认）/ RANDOM / SOURCE_HASH / LOWEST_LOAD / CONSISTENT_HASH。CONSISTENT_HASH 为可选策略，需要调用方传 key，仓库内只有基准程序走这条路径；故障重试沿环换下一台主机，不承诺缓存亲和
 - **流控**：`TokenBucket` + `BACKOFF` 自动退避重试
 - **线程池**：muduo `EventLoopThread`，per-client 独立 ring buffer，无锁 SPSC
 
@@ -131,7 +132,7 @@ lyqtRpc/
 │   │   ├── client/           # RpcClient, ClientDiscover, 熔断器, ShmClient 系列
 │   │   ├── server/           # RpcServer, Registry, 选举, ShmServer 系列
 │   │   └── general/          # ShmChannel, LVProtocol, 消息工厂, 序列化器, 日志
-│   ├── tests/                # 189 个 GTest 单测
+│   ├── tests/                # 241 个 GTest 单测
 │   ├── example/              # 示例 + 压测
 │   ├── proto/                # protobuf 定义
 │   └── muduo/                # Git 子模块
@@ -195,7 +196,7 @@ cmake --build build-vcpkg -j$(nproc)
 
 - TCP 路径已按 host 复用长连接（连接池），但同一 host 仍是单连接，多线程打同一 host 时 `send()` 持锁排队；协议多路复用（stream_id）待做
 - etcd 心跳每次 keepalive 失败后重新注册（Lease TTL 偏短），高频场景有写放大
-- SHM 大载荷（>64KB）ring buffer memcpy 两次，吞吐不如 TCP 零拷贝方案
+- SHM 零拷贝只覆盖 Protobuf 的 body 双向通路。FlatBuffers 写端仍在 heap 上 build、再把序列化结果拷进 ring（读端就地映射）；JSON 帧两端都拷贝；Protobuf 帧跨 ring 尾部时写端回退一次 string 拷贝
 - 无鉴权/加密、无流式 RPC、Topic 无持久化
 - 单测已覆盖核心模块、熔断器、注册中心、负载均衡、重试/退避、Topic 与 SHM 适配层；完整 TCP 网络层尚无单测
 

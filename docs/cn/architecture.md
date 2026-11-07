@@ -184,18 +184,20 @@ Client 进程                           Server 进程
 
 ```
 Client 进程                           Server 进程
-┌─────────────────────┐             ┌─────────────────────┐
-│ SerializeToArray()  │ ① 直写      │ ParseFromArray()    │ ③ 就地解析
-│   ↓                 │             │   ↑                 │
-│ req_write_ptr() ────┼──→ ring buffer ←── read_request() │
-│   (返回 body 地址)   │  mmap 共享   │   (返回 body 引用)  │
-│   ↓                 │             │   ↑                 │
-│ req_commit() ───┼──→ write_idx.store(release)          │
-│ notify_req()        │  eventfd    │ epoll_wait()        │ ② 内核通知
-└─────────────────────┘             └─────────────────────┘
+┌─────────────────────┐                  ┌─────────────────────┐
+│ SerializeToArray()  │ ① 直写           │ ParseFromArray()    │ ③ 就地解析
+│   ↓                 │                  │   ↑                 │
+│ req_write_ptr() ────┼──→ ring buffer ←── read_request_view() │
+│   (返回 body 地址)  │  mmap 共享       │ (返回视图并 pin 帧) │
+│   ↓                 │                  │   ↑                 │
+│ req_commit() ───────┼──→ write_idx.store(release)            │
+│ notify_req()        │ eventfd          │ epoll_wait()        │ ② 内核通知
+└─────────────────────┘                  └─────────────────────┘
 ```
 
-数据拷贝 1 次（序列化直接写入 ring buffer），系统调用 0 次（仅 eventfd 通知）。
+body 在 ring 中零拷贝：写端 `SerializeToArray` 直写，读端 `ParseFromArray` 就地解析（字段按需拷入消息对象），系统调用 0 次（仅 eventfd 通知）。
+
+该结论只覆盖 Protobuf。FlatBuffers 写端仍在 heap 上构建，再经 `std::string` 拷入 ring（读端 `ShmZcReader` 就地映射）；JSON 路径两端都拷贝。帧跨 ring 尾部时，Protobuf 写端会先写 skip 帧再回绕，这一步回退为一次 string 拷贝。
 
 ### Ring Buffer 无锁 SPSC 实现
 
@@ -217,7 +219,11 @@ uint64_t w = ch.write_idx.load(std::memory_order_acquire);
 
 ### 序列化
 
-`ISerializer` 抽象接口支持插拔。默认 `ProtobufSerializer` 调用 `msg->serialize()`/`msg->unserialize()`。JSON 路径用于调试，FlatBuffers 路径实现读端零拷贝。
+`ISerializer` 抽象接口支持插拔。默认 `ProtobufSerializer` 调用 `msg->serialize()`/`msg->unserialize()`。JSON 路径用于调试。FlatBuffers 路径实现读端零拷贝（`ShmZcReader` 就地映射），写端仍经 heap builder 与一次 body 拷贝。
+
+### 负载均衡
+
+默认 `ROUND_ROBIN`，另支持 `RANDOM` / `SOURCE_HASH` / `LOWEST_LOAD` / `CONSISTENT_HASH`，由 `RpcClient::setloadbalanceStrategy` 选择。`CONSISTENT_HASH` 需要调用方传 key（如用户/租户 ID）才有意义，仓库内只有基准程序（`example/benchmark/benchmark_consistent_hash.cc`）使用它，没有默认业务流量；故障重试沿哈希环取下一台主机，不承诺缓存亲和。
 
 ### 注册中心 HA
 
@@ -225,7 +231,7 @@ uint64_t w = ch.write_idx.load(std::memory_order_acquire);
 
 ### 熔断器
 
-三态状态机（CLOSED → OPEN → HALF_OPEN → CLOSED），method×host 粒度。状态通过 `ICircuitStateStore` 接口持久化，支持内存和 etcd 两种后端。
+三态状态机（CLOSED → OPEN → HALF_OPEN → CLOSED），method×host 粒度。状态由进程内 `MemoryCircuitStore` 保存，接口为 `ICircuitStateStore`。etcd 后端已移除：它按实例做 key、依赖 LWW，且只在首次访问时懒加载，无法表达跨实例共享的熔断状态。
 
 ### 令牌桶流控
 

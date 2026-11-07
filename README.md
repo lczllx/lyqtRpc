@@ -4,16 +4,16 @@
 
 [中文](README.zh-CN.md)
 
-> A lightweight C++20 RPC framework built on muduo + Protobuf. Dual TCP / shared-memory zero-copy transport, etcd registry, circuit breaker, token bucket, distributed tracing, Prometheus metrics, and an HTTP-to-RPC API gateway — all in one repo.
+> A lightweight C++20 RPC framework built on muduo + Protobuf. Dual TCP / shared-memory transport (zero-copy SHM for Protobuf), etcd registry, circuit breaker, token bucket, distributed tracing, Prometheus metrics, and an HTTP-to-RPC API gateway — all in one repo.
 
-Author: lczllx · Language: C++20 · Network: muduo · Transport: TCP & SHM zero-copy · Serialization: Protobuf, JSON, FlatBuffers · Build: CMake
+Author: lczllx · Language: C++20 · Network: muduo · Transport: TCP & SHM (SHM zero-copy, Protobuf) · Serialization: Protobuf, JSON, FlatBuffers · Build: CMake
 
 ## Highlights
 
-- **Dual transport**: TCP (LV variable-length framing) and SHM zero-copy (per-client ring buffer + Protobuf `SerializeToArray` direct write)
+- **Dual transport**: TCP (LV variable-length framing) and SHM zero-copy (per-client ring buffer + Protobuf `SerializeToArray` direct write; FlatBuffers reads map the ring in place, but its write side still copies the serialized body in)
 - **Service governance**: etcd registry, heartbeat keep-alive, CAS leader election, load reporting, three-state circuit breaker, token bucket rate limiting
 - **Call models**: synchronous, `std::future` async, and callback-based
-- **Pluggable serialization**: `ISerializer` abstraction, default Protobuf, JSON for debugging, FlatBuffers for zero-copy reads
+- **Pluggable serialization**: `ISerializer` abstraction, default Protobuf, JSON for debugging, FlatBuffers for zero-copy reads (write side copies once)
 - **Distributed tracing**: `trace_id` + `span_id` end-to-end propagation
 - **Multi-client concurrency**: SHM path with muduo `EventLoopThread` worker pool, per-client independent ring buffers
 - **Observability**: built-in Prometheus `/metrics` endpoint (text format 0.0.4), covering request count / latency histogram / concurrency / error count / connection count / circuit breaker state / token bucket / process-level metrics — mirrors brpc `/vars`
@@ -114,9 +114,10 @@ Provider ──REGISTER/HEARTBEAT──> Registry(etcd) <──DISCOVER── Co
 ```
 
 - **LV framing**: `| 4B total_len | 4B msg_type | 4B id_len | id | body |`
-- **SHM zero-copy**: `SerializeToArray` → ring buffer → `eventfd` → `ParseFromArray`, bypassing TCP
+- **SHM Protobuf zero-copy**: `SerializeToArray` → ring buffer → `eventfd` → `ParseFromArray`, no body copy on either side (one string copy only when a frame straddles the ring tail), bypassing TCP
 - **Registry backend**: `LCZ_ETCD` env var switches between Memory / Etcd; defaults to in-memory
-- **Circuit breaker**: three-state (CLOSED→OPEN→HALF_OPEN), method×host granularity, memory/etcd persistence
+- **Circuit breaker**: three-state (CLOSED→OPEN→HALF_OPEN), method×host granularity, state held in-process by `MemoryCircuitStore`
+- **Load balancing**: ROUND_ROBIN (default) / RANDOM / SOURCE_HASH / LOWEST_LOAD / CONSISTENT_HASH. CONSISTENT_HASH is opt-in and needs a caller-supplied key; only the benchmark routes through it — retries walk the ring to a different host, and no cache affinity is promised
 - **Rate limiter**: `TokenBucket` + `BACKOFF` automatic backoff and retry
 - **Thread pool**: muduo `EventLoopThread`, per-client ring buffer, lock-free SPSC
 
@@ -131,7 +132,7 @@ lyqtRpc/
 │   │   ├── client/           # RpcClient, ClientDiscover, CircuitBreaker, ShmClient
 │   │   ├── server/           # RpcServer, Registry, LeaderElection, ShmServer
 │   │   └── general/          # ShmChannel, LVProtocol, MessageFactory, Serializer, Logger
-│   ├── tests/                # 189 GTest cases
+│   ├── tests/                # 241 GTest cases
 │   ├── example/              # Examples + benchmarks
 │   ├── proto/                # Protobuf definitions
 │   └── muduo/                # Git submodule
@@ -195,7 +196,7 @@ First build downloads and compiles all deps (protobuf / curl / jsoncpp / flatbuf
 
 - TCP path reuses long-lived connections per host (connection pool), but each host still has a single connection — `send()` serializes behind a lock when threads share a host; protocol multiplexing (stream_id) still pending
 - etcd heartbeat re-registers on every keepalive failure (lease TTL too short), write amplification under load
-- SHM payloads >64KB copy twice through the ring buffer; throughput worse than TCP zero-copy equivalents
+- SHM zero-copy covers the Protobuf body on both directions. FlatBuffers writes still build on the heap, then copy the serialized body into the ring (its reader maps the ring in place); JSON SHM frames copy on both ends; a Protobuf write falls back to one string copy when the frame does not fit the contiguous ring tail
 - No auth / encryption; no streaming RPC; Topic has no persistence
 - Unit tests cover core modules, circuit breaker, registry, load balancing, retry/backoff, topic, and the SHM adaptor; the full TCP network layer is still untested
 

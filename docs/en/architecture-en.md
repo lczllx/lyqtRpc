@@ -142,18 +142,20 @@ Client Process                         Server Process
 
 ```
 Client Process                         Server Process
-┌─────────────────────┐             ┌─────────────────────┐
-│ SerializeToArray()  │ ① direct    │ ParseFromArray()    │ ③ in-place parse
-│   ↓                 │             │   ↑                 │
-│ req_write_ptr() ────┼──→ ring buffer ←── read_request() │
-│   (returns body ptr) │  mmap shared │   (returns body ref) │
-│   ↓                 │             │   ↑                 │
-│ req_commit() ───┼──→ write_idx.store(release)          │
-│ notify_req()        │  eventfd    │ epoll_wait()        │ ② kernel notify
-└─────────────────────┘             └─────────────────────┘
+┌─────────────────────┐                  ┌─────────────────────┐
+│ SerializeToArray()  │ ① direct         │ ParseFromArray()    │ ③ in-place parse
+│   ↓                 │                  │   ↑                 │
+│ req_write_ptr() ────┼──→ ring buffer ←── read_request_view() │
+│  (returns body ptr) │  mmap shared     │ (pinned body view)  │
+│   ↓                 │                  │   ↑                 │
+│ req_commit() ───────┼──→ write_idx.store(release)            │
+│ notify_req()        │  eventfd         │ epoll_wait()        │ ② kernel notify
+└─────────────────────┘                  └─────────────────────┘
 ```
 
-1 data copy (serialize directly into ring buffer), 0 data syscalls (eventfd notification only).
+Zero body copies inside the ring: the writer serializes in place, the reader parses in place (field values are materialized into the message object), and there are 0 data syscalls (eventfd notification only).
+
+This holds for Protobuf only. The FlatBuffers writer still builds on the heap and copies the serialized body into the ring (its reader maps the ring in place); JSON frames copy on both ends. When a Protobuf frame does not fit the contiguous ring tail, the writer emits a skip frame and wraps, falling back to one string copy.
 
 ### Lock-Free SPSC Ring Buffer
 
@@ -175,7 +177,11 @@ uint64_t w = ch.write_idx.load(std::memory_order_acquire);
 
 ### Serialization
 
-The `ISerializer` interface supports pluggable backends. Default `ProtobufSerializer` delegates to `msg->serialize()`/`msg->unserialize()`. JSON is used for debugging. FlatBuffers provides true zero-copy reads via `GetRoot<T>()`.
+The `ISerializer` interface supports pluggable backends. Default `ProtobufSerializer` delegates to `msg->serialize()`/`msg->unserialize()`. JSON is used for debugging. FlatBuffers provides zero-copy reads via `GetRoot<T>()` over the ring; its write side still goes through a heap builder and one body copy.
+
+### Load Balancing
+
+`ROUND_ROBIN` is the default; `RANDOM` / `SOURCE_HASH` / `LOWEST_LOAD` / `CONSISTENT_HASH` are selected via `RpcClient::setloadbalanceStrategy`. `CONSISTENT_HASH` only means something when the caller supplies a key (e.g. user or tenant ID); the only in-repo consumer is the benchmark (`example/benchmark/benchmark_consistent_hash.cc`), so no default traffic uses it. On failure, retries walk the ring to the next host — no cache affinity is promised.
 
 ### Registry HA
 
@@ -183,7 +189,7 @@ Multiple Registry instances share an etcd backend. `SO_REUSEPORT` distributes co
 
 ### Circuit Breaker
 
-Three-state state machine (CLOSED → OPEN → HALF_OPEN → CLOSED), per method×host granularity. State persists via the `ICircuitStateStore` interface with in-memory and etcd backends.
+Three-state state machine (CLOSED → OPEN → HALF_OPEN → CLOSED), per method×host granularity. State is held in-process by `MemoryCircuitStore` behind the `ICircuitStateStore` interface. The etcd backend was removed: it keyed state per instance, relied on last-write-wins, and loaded lazily on first access, so it could not represent a shared circuit state across instances.
 
 ### Token Bucket Rate Limiting
 
