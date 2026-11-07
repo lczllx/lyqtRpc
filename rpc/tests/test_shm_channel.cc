@@ -10,6 +10,7 @@
 
 #include <gtest/gtest.h>
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -654,6 +655,44 @@ TEST_F(ShmChannelTest, FullRingWaitsBudgetBeforeFailing) {
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::steady_clock::now() - t0).count();
     EXPECT_GE(elapsed, 50); // 预算 60ms，留 10ms 调度余量
+    ch.destroy();
+}
+
+// 满环等待必须让出 CPU：yield 之后转入睡眠，而不是忙等烧核。
+// 同时覆盖「wrap 写跳过帧后仍然放不下」的分支（旧实现死赋值 contig = r % ds 所在处）。
+TEST_F(ShmChannelTest, FullRingWaitYieldsCpu) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 64, 64));
+
+    // [0,8) 空 body 帧；[8,56) 40B body 帧；消费第一帧后 r=8、w=56。
+    // 再写 9B 帧：总空闲 16B 够，但尾部连续只有 8B —— 写跳过帧后仍放不下。
+    ASSERT_TRUE(ch.write_request("", MsgType::REQ_RPC_PROTO, 0));
+    std::string big(40, 'a');
+    ASSERT_TRUE(ch.write_request(big, MsgType::REQ_RPC_PROTO, 0));
+    std::string body;
+    MsgType type;
+    ASSERT_TRUE(ch.read_request(body, type));
+    EXPECT_TRUE(body.empty());
+
+    struct timespec cpu_begin, cpu_end;
+    ASSERT_EQ(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_begin), 0);
+    auto wall_begin = std::chrono::steady_clock::now();
+
+    EXPECT_FALSE(ch.write_request("x", MsgType::REQ_RPC_PROTO, 50));
+
+    auto wall_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now() - wall_begin).count();
+    ASSERT_EQ(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_end), 0);
+    long cpu_ms = static_cast<long>(cpu_end.tv_sec - cpu_begin.tv_sec) * 1000 +
+                  static_cast<long>(cpu_end.tv_nsec - cpu_begin.tv_nsec) / 1000000;
+
+    EXPECT_GE(wall_ms, 40);         // 确实等满了预算
+    EXPECT_LT(cpu_ms * 2, wall_ms); // 让出 CPU；忙等会接近 1:1
+
+    // 等待失败后 ring 仍可用
+    ASSERT_TRUE(ch.read_request(body, type));
+    EXPECT_EQ(body, big);
+    ASSERT_TRUE(ch.write_request("x", MsgType::REQ_RPC_PROTO, 0));
     ch.destroy();
 }
 
