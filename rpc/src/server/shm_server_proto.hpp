@@ -3,7 +3,7 @@
 // shm_server_proto.hpp — SHM + Protobuf 零拷贝 Server（muduo EventLoopThreadPool）
 // =============================================================================
 // 写端: req_write_ptr → SerializeToArray 直接进 ring buffer（零拷贝）
-// 读端: read_request → ParseFromString
+// 读端: read_request_view → ParseFromArray 直接从 ring 解析（不拷贝 body）
 // 线程池: muduo::net::EventLoopThreadPool + Channel 包装 req_fd
 // =============================================================================
 
@@ -141,13 +141,14 @@ namespace lcz_rpc
                 ch->setReadCallback([this, entry, req_fd](muduo::Timestamp)
                                     {
                 uint64_t val; (void)::read(req_fd, &val, sizeof(val));
-                std::string body; MsgType type;
-                while (entry->channel.read_request(body, type)) {
-                    auto msg = MessageFactory::create(type);
-                    if (msg && msg->unserialize(body)) {
-                        msg->setMsgType(type);
-                        if (_cb_message) _cb_message(entry->conn, msg);
-                    }
+                ShmChannel::FrameView view;
+                while (entry->channel.read_request_view(view)) {
+                    auto msg = MessageFactory::create(view.type);
+                    // protobuf 的 ParseFromArray 已把字段拷进消息对象，解析完即可解 pin
+                    bool ok = msg && msg->unserialize(view.body_view());
+                    if (ok) msg->setMsgType(view.type);
+                    entry->channel.release_request_view();
+                    if (ok && _cb_message) _cb_message(entry->conn, msg);
                 } });
                 auto *ch_raw = ch.get();
                 workerLoop->runInLoop([ch_raw]()

@@ -3,7 +3,7 @@
 // shm_client_proto.hpp — SHM + Protobuf 零拷贝 Client
 // =============================================================================
 // 写端: req_write_ptr → SerializeToArray 直接进 ring buffer（零拷贝）
-// 读端: read_response → ParseFromString（protobuf 紧凑二进制，快于 JSON）
+// 读端: read_response_view → ParseFromArray（protobuf 紧凑二进制，直接从 ring 解析）
 // =============================================================================
 
 #include "general/abstract.hpp"
@@ -161,8 +161,6 @@ namespace lcz_rpc
             ev.events = EPOLLIN;
             ev.data.fd = _channel.resp_notify_fd();
             epoll_ctl(epfd, EPOLL_CTL_ADD, _channel.resp_notify_fd(), &ev);
-            std::string body;
-            MsgType type;
             const int resp_fd = _channel.resp_notify_fd();
             LCZ_INFO("[ShmClientProto] responseLoop started, resp_fd=%d", resp_fd);
             while (!st.stop_requested())
@@ -185,15 +183,16 @@ namespace lcz_rpc
                     uint64_t val;
                     (void)::read(resp_fd, &val, sizeof(val));
                 }
-                while (_channel.read_response(body, type))
+                ShmChannel::FrameView view;
+                while (_channel.read_response_view(view))
                 {
-                    auto msg = MessageFactory::create(type);
-                    if (msg && msg->unserialize(body))
-                    {
-                        msg->setMsgType(type);
-                        if (_cb_message)
-                            _cb_message(_conn, msg);
-                    }
+                    auto msg = MessageFactory::create(view.type);
+                    // ParseFromArray 已把字段拷进消息对象，解析完即可解 pin
+                    bool ok = msg && msg->unserialize(view.body_view());
+                    if (ok) msg->setMsgType(view.type);
+                    _channel.release_response_view();
+                    if (ok && _cb_message)
+                        _cb_message(_conn, msg);
                 }
             }
             if (!st.stop_requested() && _conn)

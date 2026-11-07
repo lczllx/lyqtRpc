@@ -374,60 +374,96 @@ namespace lcz_rpc
         }
     }
 
-    // ====== 内部：从指定通道读一帧 ======
+    // ====== 内部：读取一帧视图（不拷贝，不推进 read_idx） ======
+    bool ShmChannel::read_frame_view(ShmRingBuf &ch, char *data_base,
+                                     uint64_t &pinned_end, FrameView &view)
+    {
+        // 上一帧还没 release：调用方违约。这里不能继续读——推 read_idx 会让
+        // 生产者覆盖上一帧，view 变成悬空 span。
+        if (pinned_end != 0)
+        {
+            LCZ_WARN("read_frame_view: previous frame not released (pinned_end=%lu)", pinned_end);
+            return false;
+        }
+
+        for (;;)
+        {
+            // 1. 读自己位置（relaxed）+ 读生产者位置（acquire）
+            uint64_t r = ch.read_idx.load(std::memory_order_relaxed);
+            uint64_t w = ch.write_idx.load(std::memory_order_acquire);
+            if (w == r)
+                return false; // 空了，没有新数据
+
+            uint64_t ds = ch.data_size;
+            uint64_t offset = r % ds;      // 环形偏移
+            uint64_t contig = ds - offset; // 从当前位置到 buffer 末尾的连续字节数
+
+            // 2. 尾部不足 4 字节：生产者只写了部分跳过标记（写不下完整 4B 帧头）。
+            //    不能按 4B 读 frame_len：请求方向会读进响应区，响应方向会越出 mmap。
+            //    真实帧至少 8 字节且必须连续，所以 contig < 4 只可能是跳过标记的残尾。
+            if (contig < 4)
+            {
+                LCZ_DEBUG("read_frame_view hit partial skip frame, jumping %lu bytes", contig);
+                ch.read_idx.store(r + contig, std::memory_order_release);
+                continue;
+            }
+
+            // 3. 读帧头 4B → frame_len；0 表示生产者写的整段跳过帧
+            uint32_t frame_len;
+            memcpy(&frame_len, data_base + offset, 4);
+            if (frame_len == 0)
+            {
+                LCZ_DEBUG("read_frame_view hit skip frame at offset %lu, jumping to 0", offset);
+                ch.read_idx.store(r + contig, std::memory_order_release);
+                continue;
+            }
+
+            // 4. 真实帧至少 8 字节（帧头），且生产者保证帧不跨尾部（放不下会写跳过帧）。
+            //    不满足说明帧头已损坏，继续按它前进会越界读或绕过整段 ring。
+            if (frame_len < 8 || frame_len > contig)
+            {
+                LCZ_ERROR("read_frame_view: corrupt frame_len=%u at offset=%lu (contig=%lu)",
+                          frame_len, offset, contig);
+                return false;
+            }
+
+            // 5. 读 msg_type（4B int32 → MsgType 枚举）
+            int32_t mt;
+            memcpy(&mt, data_base + offset + 4, 4);
+            view.type = static_cast<MsgType>(mt);
+
+            // 6. body 直接指向 ring：read_idx 不动，生产者看到未消费就不会覆盖
+            view.body = std::span<const char>(data_base + offset + 8, frame_len - 8);
+            pinned_end = r + frame_len;
+
+            LCZ_DEBUG("read_frame_view done: type=%d body_len=%zu pinned_end=%lu",
+                      static_cast<int>(view.type), view.body.size(), pinned_end);
+            return true;
+        }
+    }
+
+    void ShmChannel::release_frame_view(ShmRingBuf &ch, uint64_t &pinned_end)
+    {
+        if (pinned_end == 0)
+            return;
+        // release：保证消费者读完 body 先于生产者看到新的 read_idx
+        ch.read_idx.store(pinned_end, std::memory_order_release);
+        pinned_end = 0;
+    }
+
+    // ====== 内部：从指定通道读一帧（拷贝版，保留给 JSON 路径和测试） ======
     bool ShmChannel::read_from(ShmRingBuf &ch, char *data_base,
                                std::string &body, MsgType &type)
     {
-        // 1. 读自己位置（relaxed）+ 读生产者位置（acquire）
-        uint64_t r = ch.read_idx.load(std::memory_order_relaxed);
-        uint64_t w = ch.write_idx.load(std::memory_order_acquire);
-        if (w == r)
-            return false; // 空了，没有新数据
+        // 与 read_*_view 共用同一套跳过帧/越界检查，读完立刻 release
+        uint64_t &pinned_end = (&ch == &_ctrl->req_channel) ? _req_pin_end : _resp_pin_end;
+        FrameView view;
+        if (!read_frame_view(ch, data_base, pinned_end, view))
+            return false;
 
-        LCZ_DEBUG("read_from: r=%lu w=%lu avail=%lu", r, w, w - r);
-
-        uint64_t ds = ch.data_size;
-        uint64_t offset = r % ds; // 环形偏移
-        uint64_t contig = ds - offset; // 从当前位置到 buffer 末尾的连续字节数
-
-        // 2. 尾部不足 4 字节时，生产者只能写部分跳过标记（写不下完整的 4B 帧头）。
-        //    这里不能按 4B 读 frame_len：请求方向会读进响应区，响应方向会越出 mmap。
-        //    真实帧至少 8 字节且必须连续，所以 contig < 4 只可能是跳过标记的残尾。
-        if (contig < 4)
-        {
-            LCZ_DEBUG("read_from hit partial skip frame, jumping %lu bytes to buffer head", contig);
-            ch.read_idx.store(r + contig, std::memory_order_release);
-            return read_from(ch, data_base, body, type);
-        }
-
-        // 3. 读帧头 4B → frame_len
-        uint32_t frame_len;
-        memcpy(&frame_len, data_base + offset, 4);
-        LCZ_DEBUG("read_from offset=%lu frame_len=%u", offset, frame_len);
-
-        // 4. frame_len == 0 → 生产者写的跳过帧
-        //    直接跳到 buffer 头，重试一次
-        if (frame_len == 0)
-        {
-            LCZ_DEBUG("read_from hit skip frame, jumping from offset %lu to 0", offset);
-            // ds - offset = 从当前位置到尾部的字节数，全部跳过
-            ch.read_idx.store(r + (ds - offset), std::memory_order_release);
-            return read_from(ch, data_base, body, type);
-        }
-
-        // 5. 读 msg_type（4B int32 → MsgType 枚举）
-        int32_t mt;
-        memcpy(&mt, data_base + offset + 4, 4);
-        type = static_cast<MsgType>(mt);
-
-        // 6. 读 body（frame_len - 8 字节，减去帧头）
-        body.assign(data_base + offset + 8, frame_len - 8);
-
-        LCZ_DEBUG("read_from done: type=%d body_len=%zu new_read_idx=%lu",
-                  static_cast<int>(type), body.size(), r + frame_len);
-
-        // 7. 确认消费完成，挪 read_idx
-        ch.read_idx.store(r + frame_len, std::memory_order_release);
+        body.assign(view.body.data(), view.body.size());
+        type = view.type;
+        release_frame_view(ch, pinned_end);
         return true;
     }
 
@@ -467,6 +503,24 @@ namespace lcz_rpc
         return ok;
     }
 
+    // ====== 零拷贝读视图 ======
+    bool ShmChannel::read_request_view(FrameView &view)
+    {
+        return read_frame_view(_ctrl->req_channel, _req_data, _req_pin_end, view);
+    }
+    bool ShmChannel::read_response_view(FrameView &view)
+    {
+        return read_frame_view(_ctrl->resp_channel, _resp_data, _resp_pin_end, view);
+    }
+    void ShmChannel::release_request_view()
+    {
+        release_frame_view(_ctrl->req_channel, _req_pin_end);
+    }
+    void ShmChannel::release_response_view()
+    {
+        release_frame_view(_ctrl->resp_channel, _resp_pin_end);
+    }
+
     // 析构自动清理，防止测试或异常路径泄漏 mmap / fd
     ShmChannel::~ShmChannel()
     {
@@ -504,10 +558,12 @@ namespace lcz_rpc
             LCZ_DEBUG("shm_unlink %s", _name.c_str());
             shm_unlink(_name.c_str());
         }
-        // 4. 清空指针，防止悬挂引用
+        // 4. 清空指针，防止悬挂引用；未释放的读视图随映射一起失效
         _ctrl = nullptr;
         _req_data = nullptr;
         _resp_data = nullptr;
+        _req_pin_end = 0;
+        _resp_pin_end = 0;
         LCZ_DEBUG("ShmChannel::destroy done");
     }
     // ====== 对端存活检查 ======

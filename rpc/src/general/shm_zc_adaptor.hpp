@@ -71,8 +71,8 @@ namespace lcz_rpc
     };
 
     // ====== 零拷贝读取辅助 ==========================================================
-    // 从 read_request/read_response 拿到的 body 数据构造，
-    // 直接 cast 为 FlatBuffers 对象，无 deserialize 开销
+    // 从 read_request_view/read_response_view 拿到的 body 构造，
+    // 直接 cast 为 FlatBuffers 对象，无 deserialize 开销、也不拷贝 body
     // FlatBuffers 生成的 Table 类型。flatc 生成的表是 : private ::flatbuffers::Table
     // （刻意隐藏 Table 的公开接口），std::derived_from 要求 Derived* → Base* 可转换，
     // 私有继承下为假；std::is_base_of 只看继承关系、不看访问级别，因此用 is_base_of_v。

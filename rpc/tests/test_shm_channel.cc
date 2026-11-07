@@ -2,7 +2,8 @@
 // test_shm_channel.cc — 共享内存 Transport 单测
 // -----------------------------------------------------------------------------
 // 总测什么：create/open 生命周期、单帧读写往返、双通道不串扰、
-//           跳过帧边界 wrap、大消息、空读返回 false、反复销毁重建不残留。
+//           跳过帧边界 wrap、大消息、空读返回 false、反复销毁重建不残留、
+//           零拷贝读视图（pin/release、生产者不覆盖、帧头损坏拒绝前进）。
 // 不测什么：跨进程 / 多线程内存序（见 test_shm_memory_order.cc），
 //           真实进程崩溃 / 半写 / 满环 BACKOFF / notify 丢失（见 test_shm_fault.cc）。
 // =============================================================================
@@ -714,6 +715,149 @@ TEST_F(ShmChannelTest, OversizeFrameFailsImmediately) {
     ASSERT_TRUE(ch.read_request(body, type));
     EXPECT_EQ(body, "ok");
     ch.destroy();
+}
+
+// -----------------------------------------------------------------------------
+// §8 零拷贝读视图：body 指向 ring、release 前 read_idx 不前进
+// -----------------------------------------------------------------------------
+
+// 视图内容与类型正确；未 release 时不能读到下一帧，release 后正常
+TEST_F(ShmChannelTest, ReadViewRoundtripAndRelease) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 4096, 4096));
+
+    ASSERT_TRUE(ch.write_request("view body", MsgType::REQ_RPC_PROTO));
+    ShmChannel::FrameView view;
+    ASSERT_TRUE(ch.read_request_view(view));
+    EXPECT_EQ(view.type, MsgType::REQ_RPC_PROTO);
+    EXPECT_EQ(view.body_view(), "view body");
+    EXPECT_FALSE(ch.read_request_view(view)); // 上一帧未释放，不能越过它
+
+    ch.release_request_view();
+    EXPECT_FALSE(ch.read_request_view(view)); // 已消费且 ring 空
+    ch.destroy();
+}
+
+// 多帧顺序：读一帧 → 释放 → 读下一帧
+TEST_F(ShmChannelTest, ReadViewFramesInOrder) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 4096, 4096));
+    ASSERT_TRUE(ch.write_request("first", MsgType::REQ_RPC_PROTO));
+    ASSERT_TRUE(ch.write_request("second", MsgType::REQ_RPC_PROTO));
+
+    ShmChannel::FrameView view;
+    ASSERT_TRUE(ch.read_request_view(view));
+    EXPECT_EQ(view.body_view(), "first");
+    ch.release_request_view();
+    ASSERT_TRUE(ch.read_request_view(view));
+    EXPECT_EQ(view.body_view(), "second");
+    ch.release_request_view();
+    EXPECT_FALSE(ch.read_request_view(view));
+
+    ch.destroy();
+}
+
+// 未释放的视图把 ring 空间钉住：生产者只能写到 write_idx 之后，
+// 空间不够时写失败，而不是覆盖正在被读的帧
+TEST_F(ShmChannelTest, PinnedViewBlocksProducerReuse) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 64, 64));
+    const std::string a(24, 'A'); // frame_len = 32
+    const std::string b(24, 'B');
+    const std::string c(24, 'C');
+
+    ASSERT_TRUE(ch.write_request(a, MsgType::REQ_RPC_PROTO)); // 占 [0,32)
+    ShmChannel::FrameView view;
+    ASSERT_TRUE(ch.read_request_view(view));
+    EXPECT_EQ(view.body_view(), a);
+
+    // read_idx 仍为 0，w=32：第二帧占满剩余 32B，第三帧必然写不下
+    ASSERT_TRUE(ch.write_request(b, MsgType::REQ_RPC_PROTO));
+    EXPECT_FALSE(ch.write_request(c, MsgType::REQ_RPC_PROTO, 0));
+    EXPECT_EQ(view.body_view(), a); // 被 pin 的帧没有被踩
+
+    ch.release_request_view();
+    ASSERT_TRUE(ch.write_request(c, MsgType::REQ_RPC_PROTO, 0)); // 空间回来了
+    ch.destroy();
+}
+
+// 视图 API 同样要跳过整段/残尾跳过帧
+TEST_F(ShmChannelTest, ReadViewSkipsTailAndWraps) {
+    static const size_t SZ = 64;
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", SZ, SZ));
+
+    // frame_len = SZ - 1 → 尾部剩 1 字节残尾
+    std::string aligner(SZ - 8 - 1, 'A');
+    ASSERT_TRUE(ch.write_request(aligner, MsgType::REQ_RPC_PROTO));
+    ShmChannel::FrameView view;
+    ASSERT_TRUE(ch.read_request_view(view));
+    EXPECT_EQ(view.body_view(), aligner);
+    ch.release_request_view();
+
+    // 触发 wrap：生产者写残尾清零标记，再从头部写新帧
+    ASSERT_TRUE(ch.write_request("x", MsgType::REQ_RPC_PROTO));
+    ASSERT_TRUE(ch.read_request_view(view));
+    EXPECT_EQ(view.body_view(), "x");
+    EXPECT_EQ(view.type, MsgType::REQ_RPC_PROTO);
+    ch.release_request_view();
+
+    ch.destroy();
+}
+
+// 响应方向同样支持视图，且与请求方向互不影响
+TEST_F(ShmChannelTest, ReadResponseViewIndependentOfRequest) {
+    ShmChannel ch;
+    ASSERT_TRUE(ch.create("/test_shm_gtest", 4096, 4096));
+    ASSERT_TRUE(ch.write_request("req", MsgType::REQ_RPC_PROTO));
+    ASSERT_TRUE(ch.write_response("resp", MsgType::RSP_RPC_PROTO));
+
+    ShmChannel::FrameView req_view, resp_view;
+    ASSERT_TRUE(ch.read_response_view(resp_view));
+    EXPECT_EQ(resp_view.type, MsgType::RSP_RPC_PROTO);
+    EXPECT_EQ(resp_view.body_view(), "resp");
+    // 响应方向 pin 住不影响请求方向
+    ASSERT_TRUE(ch.read_request_view(req_view));
+    EXPECT_EQ(req_view.body_view(), "req");
+
+    ch.release_response_view();
+    ch.release_request_view();
+    EXPECT_FALSE(ch.read_response_view(resp_view));
+    EXPECT_FALSE(ch.read_request_view(req_view));
+    ch.destroy();
+}
+
+// 帧头损坏时不能按 frame_len 前进：会越界读（越过 mmap 尾）或把整段 ring 当一帧
+TEST_F(ShmChannelTest, ReadViewRejectsCorruptFrameLen) {
+    for (uint32_t bad : {4u, 4096u}) {
+        SCOPED_TRACE(bad);
+        std::string name = "/test_shm_corrupt_" + std::to_string(bad);
+        shm_unlink(name.c_str());
+
+        ShmChannel ch;
+        ASSERT_TRUE(ch.create(name, 64, 64));
+
+        // 第二个映射指向同一物理页，用来伪造帧头
+        int fd = shm_open(name.c_str(), O_RDWR, 0);
+        ASSERT_GE(fd, 0);
+        struct stat st {};
+        ASSERT_EQ(fstat(fd, &st), 0);
+        void *addr = mmap(nullptr, static_cast<size_t>(st.st_size),
+                          PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        ASSERT_NE(addr, MAP_FAILED);
+        auto *ctrl = static_cast<lcz_rpc::ShmControl *>(addr);
+        char *req_data = static_cast<char *>(addr) + lcz_rpc::SHM_CTRL_SIZE;
+        memcpy(req_data, &bad, 4);
+        ctrl->req_channel.write_idx.store(64, std::memory_order_release);
+
+        ShmChannel::FrameView view;
+        EXPECT_FALSE(ch.read_request_view(view));
+
+        munmap(addr, static_cast<size_t>(st.st_size));
+        close(fd);
+        ch.destroy();
+        shm_unlink(name.c_str());
+    }
 }
 
 // 默认段大小从 64MB 降到 8MB（按 64 客户端算，单方向常驻页从 4GB 降到 512MB）

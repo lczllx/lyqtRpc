@@ -167,8 +167,6 @@ namespace lcz_rpc
             ev.data.fd = _channel.resp_notify_fd();
             epoll_ctl(epfd, EPOLL_CTL_ADD, _channel.resp_notify_fd(), &ev);
 
-            std::string body;
-            MsgType type;
             const int resp_fd = _channel.resp_notify_fd();
             LCZ_INFO("[ShmClientZc] responseLoop started, resp_fd=%d", resp_fd);
             while (!st.stop_requested())
@@ -192,32 +190,36 @@ namespace lcz_rpc
                     (void)::read(resp_fd, &val, sizeof(val));
                 }
 
-                while (_channel.read_response(body, type))
+                ShmChannel::FrameView view;
+                while (_channel.read_response_view(view))
                 {
-                    if (type != MsgType::RSP_RPC_FLAT)
-                        continue;
-                    ShmZcReader reader(body);
-                    auto *fresp = reader.as<lcz_rpc::fb::RpcResponse>();
-                    if (!fresp)
-                        continue;
-
-                    auto json_resp = MessageFactory::create<RpcResponse>();
-                    json_resp->setId(ShmZcReader::strval(fresp->id()));
-                    json_resp->setRcode(static_cast<RespCode>(fresp->rcode()));
-                    json_resp->setMsgType(MsgType::RSP_RPC);
-                    if (fresp->result() && fresp->result()->size() > 0)
+                    BaseMessage::ptr base_msg;
+                    if (view.type == MsgType::RSP_RPC_FLAT)
                     {
-                        std::string rs(reinterpret_cast<const char *>(fresp->result()->data()),
-                                       fresp->result()->size());
-                        Json::Value rv;
-                        if (JSON::deserialize(rs, rv))
-                            json_resp->setResult(rv);
+                        // FlatBuffers 直接映射 ring，不拷贝 body
+                        ShmZcReader reader(view.body);
+                        auto *fresp = reader.as<lcz_rpc::fb::RpcResponse>();
+                        if (fresp)
+                        {
+                            auto json_resp = MessageFactory::create<RpcResponse>();
+                            json_resp->setId(ShmZcReader::strval(fresp->id()));
+                            json_resp->setRcode(static_cast<RespCode>(fresp->rcode()));
+                            json_resp->setMsgType(MsgType::RSP_RPC);
+                            if (fresp->result() && fresp->result()->size() > 0)
+                            {
+                                std::string rs(reinterpret_cast<const char *>(fresp->result()->data()),
+                                               fresp->result()->size());
+                                Json::Value rv;
+                                if (JSON::deserialize(rs, rv))
+                                    json_resp->setResult(rv);
+                            }
+                            base_msg = json_resp;
+                        }
                     }
-                    if (_cb_message)
-                    {
-                        BaseMessage::ptr base_msg = json_resp;
+                    // 视图里的字段已拷进消息对象，派发前解 pin，不跨回调占用 ring
+                    _channel.release_response_view();
+                    if (base_msg && _cb_message)
                         _cb_message(_conn, base_msg);
-                    }
                 }
             }
             if (!st.stop_requested() && _conn)

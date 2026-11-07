@@ -205,38 +205,41 @@ namespace lcz_rpc
             auto &w = _workers[id];
             const int MAX = 64;
             struct epoll_event events[MAX];
-            std::string body;
-            MsgType type;
             // 通知只是唤醒提示，超时轮询也排空一次，避免丢失通知后请求永久挂起
             auto drain_requests = [&](const std::shared_ptr<ClientEntry> &entry)
             {
-                while (entry->channel.read_request(body, type))
+                ShmChannel::FrameView view;
+                while (entry->channel.read_request_view(view))
                 {
-                    if (type != MsgType::REQ_RPC_FLAT)
-                        continue;
-                    ShmZcReader reader(body);
-                    auto *req = reader.as<fb::RpcRequest>();
-                    if (!req)
-                        continue;
-                    auto json_req = MessageFactory::create<RpcRequest>();
-                    json_req->setId(ShmZcReader::strval(req->id()));
-                    json_req->setMethod(ShmZcReader::strval(req->method()));
-                    json_req->setTraceId(ShmZcReader::strval(req->trace_id()));
-                    json_req->setSpanId(ShmZcReader::strval(req->span_id()));
-                    json_req->setMsgType(MsgType::REQ_RPC);
-                    if (req->params() && req->params()->size() > 0)
+                    BaseMessage::ptr bm;
+                    if (view.type == MsgType::REQ_RPC_FLAT)
                     {
-                        std::string ps(reinterpret_cast<const char *>(req->params()->data()),
-                                       req->params()->size());
-                        Json::Value pv;
-                        if (JSON::deserialize(ps, pv))
-                            json_req->setParams(pv);
+                        // FlatBuffers 直接映射 ring，不拷贝 body
+                        ShmZcReader reader(view.body);
+                        auto *req = reader.as<fb::RpcRequest>();
+                        if (req)
+                        {
+                            auto json_req = MessageFactory::create<RpcRequest>();
+                            json_req->setId(ShmZcReader::strval(req->id()));
+                            json_req->setMethod(ShmZcReader::strval(req->method()));
+                            json_req->setTraceId(ShmZcReader::strval(req->trace_id()));
+                            json_req->setSpanId(ShmZcReader::strval(req->span_id()));
+                            json_req->setMsgType(MsgType::REQ_RPC);
+                            if (req->params() && req->params()->size() > 0)
+                            {
+                                std::string ps(reinterpret_cast<const char *>(req->params()->data()),
+                                               req->params()->size());
+                                Json::Value pv;
+                                if (JSON::deserialize(ps, pv))
+                                    json_req->setParams(pv);
+                            }
+                            bm = json_req;
+                        }
                     }
-                    if (_cb_message)
-                    {
-                        BaseMessage::ptr bm = json_req;
+                    // 视图里的字段已拷进消息对象，派发前解 pin，不跨回调占用 ring
+                    entry->channel.release_request_view();
+                    if (bm && _cb_message)
                         _cb_message(entry->conn, bm);
-                    }
                 }
             };
 

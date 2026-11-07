@@ -99,12 +99,30 @@ namespace lcz_rpc
 
         // ====== 请求方向（Client → Server） ======
         // wait_ms > 0 时 ring 满会阻塞等待空位（有界背压），超时才返回 false
+        // read_* 拷贝到 std::string；read_*_view 直接给出 ring 内的视图（见下）
         bool write_request(std::string_view body, MsgType type, int wait_ms = SHM_REQUEST_WAIT_MS);
         bool read_request(std::string &body, MsgType &type);
 
         // ====== 响应方向（Server → Client） ======
         bool write_response(std::string_view body, MsgType type, int wait_ms = SHM_RESPONSE_WAIT_MS);
         bool read_response(std::string &body, MsgType &type);
+
+        // ====== 零拷贝读视图（与 write_ptr 对称） ======
+        // body 直接指向 ring 内已提交的帧，不做拷贝；read_idx 在 release 前停在
+        // 该帧起点，生产者据此认为这块内存仍被占用，不会覆盖它。
+        // 契约：同一方向 read → release 必须成对；未 release 时再次 read 返回 false
+        //       （推 read_idx 会放行生产者，让正在读的视图失效）。
+        struct FrameView
+        {
+            std::span<const char> body;      // 不含 8B 帧头
+            MsgType type = MsgType::REQ_RPC; // 帧头带出的消息类型
+
+            std::string_view body_view() const { return {body.data(), body.size()}; }
+        };
+        bool read_request_view(FrameView &view);
+        bool read_response_view(FrameView &view);
+        void release_request_view();
+        void release_response_view();
 
         // 每方向 ring 的容量（字节）；发送前可据此判断单帧是否必然放不下
         size_t req_capacity() const { return _ctrl ? _ctrl->req_channel.data_size : 0; }
@@ -165,6 +183,15 @@ namespace lcz_rpc
                       std::string_view body, MsgType type, int wait_ms);
         bool read_from(ShmRingBuf &ch, char *data_base,
                        std::string &body, MsgType &type);
+
+        // 读取一帧视图：跳过帧就地推进 read_idx，真实帧只记录 pinned_end
+        bool read_frame_view(ShmRingBuf &ch, char *data_base,
+                             uint64_t &pinned_end, FrameView &view);
+        void release_frame_view(ShmRingBuf &ch, uint64_t &pinned_end);
+
+        // 未释放读视图的帧尾（0 = 无）。只由该方向的消费者线程读写。
+        uint64_t _req_pin_end = 0;
+        uint64_t _resp_pin_end = 0;
 
         int _shm_fd = -1;            // shm_open 返回
         void *_addr = nullptr;       // mmap 返回的虚拟地址
